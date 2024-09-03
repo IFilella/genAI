@@ -10,31 +10,11 @@ import torchvision
 from torchview import draw_graph
 from torchinfo import summary
 from transformers import AutoTokenizer
+from lightning.fabric import Fabric
 
-# Create a Tokenizer class
-# This is an in-house tokenizer that combines two different tokenizers
-# for protein sequences and SMILES strings
+fabric = Fabric(accelerator='cuda', devices=4, num_nodes=1)
+fabric.launch()
 
-class Tokenizer:
-    def __init__(self, prot_tokenizer_name='facebook/esm2_t33_650M_UR50D', mol_tokenizer_name='ibm/MolFormer-XL-both-10pct', delim='$'):
-        self.prot_tokenizer = AutoTokenizer.from_pretrained(prot_tokenizer_name)
-        self.mol_tokenizer = AutoTokenizer.from_pretrained(mol_tokenizer_name, trust_remote_code=True)
-        self.delim = delim
-
-    def tokenize_texts(self, prots, mols):
-        tokenized_prots = self.prot_tokenizer(prots, padding='max_length', truncation=True, max_length=150, return_tensors='pt')
-        tokenized_mols = self.mol_tokenizer(mols, padding='longest', return_tensors='pt')
-        tokenized_delim = self.prot_tokenizer([self.delim] * len(prots), padding=True, return_tensors='pt')
-
-        input_tensor = torch.cat((tokenized_prots['input_ids'], tokenized_delim['input_ids'], tokenized_mols['input_ids']), dim=1)
-        vocab_size = self.prot_tokenizer.vocab_size + self.mol_tokenizer.vocab_size + 1
-        
-        return input_tensor, vocab_size
-    
-    def __call__(self, prots, mols):
-        return self.tokenize_texts(prots, mols)
-    
-    
 # Decoder Block
 class DecoderBlock(nn.Module):
     def __init__(self, d_model, num_heads, ff_hidden_layer, dropout, device):
@@ -48,11 +28,10 @@ class DecoderBlock(nn.Module):
         self.norm2 = nn.LayerNorm(d_model)
         self.dropout2 = nn.Dropout(dropout)
         self.device = device
-
     
     def forward(self, x,target_mask):
-        target_mask = target_mask.to('cuda:%d' %self.device)
-        x = x.to('cuda:%d' %self.device)
+        target_mask = fabric.to_device(target_mask)
+        x = fabric.to_device(x)
         attn_output, _ = self.self_attention(x, x, x, attn_mask=target_mask)
         x = x + self.dropout1(attn_output)
         x = self.norm1(x)
@@ -78,7 +57,9 @@ class PositionalEncoding(nn.Module):
         #self.register_buffer("pe", nn.Parameter(pe, requires_grad=False))
 
     def forward(self, x):
-        x = x.to('cuda:%d'%self.device) + self.pe[:x.size(0), :].to('cuda:%d'%self.device)
+        x = fabric.to_device(x)
+        self.pe = fabric.to_device(self.pe)
+        x = x + self.pe[:x.size(0), :]
         return self.dropout(x)
     
 # We need to mask out input decoders to prevent attention to future positions
@@ -104,14 +85,13 @@ class MultiLayerTransformerDecoder(nn.Module):
         self.softmax = nn.LogSoftmax(dim=-1)
         self.device = device
 
-
     def forward(self, x):
         x = x.long().clone()
         x = self.embedding(x)
         x = self.pos_encoder(x)
         for transformer_block in self.transformer_blocks:
             target_mask = generate_square_subsequent_mask(x.size(0))
-            target_mask = target_mask.to(self.device)
+            target_mask = fabric.to_device(target_mask)
             x = transformer_block(x,target_mask)
         output = self.linear(x)
         output = self.softmax(output)
