@@ -9,12 +9,13 @@ import seaborn as sns
 import torchvision
 from torchview import draw_graph
 from torchinfo import summary
-from transformers import AutoTokenizer
+from tokenizer import Tokenizer
 from lightning.fabric import Fabric
 
-fabric = Fabric(accelerator='cuda', devices=4, num_nodes=1)
+fabric = Fabric(accelerator='cuda', devices=1, num_nodes=1)
 fabric.launch()
-
+rank = fabric.global_rank
+    
 # Decoder Block
 class DecoderBlock(nn.Module):
     def __init__(self, d_model, num_heads, ff_hidden_layer, dropout, device):
@@ -87,6 +88,7 @@ class MultiLayerTransformerDecoder(nn.Module):
 
     def forward(self, x):
         x = x.long().clone()
+        x = fabric.to_device(x)
         x = self.embedding(x)
         x = self.pos_encoder(x)
         for transformer_block in self.transformer_blocks:
@@ -100,9 +102,9 @@ class MultiLayerTransformerDecoder(nn.Module):
 
 if __name__ == '__main__':
     
-    
     mask = generate_square_subsequent_mask(sz=5)
-
+    print(mask)
+    
     # TEST THE TOKENIZER CLASS
     
     tokenizer = Tokenizer()
@@ -110,6 +112,7 @@ if __name__ == '__main__':
     prot_seqs = [text.split('$')[0] for text in texts]
     smiles = [text.split('$')[1] for text in texts]
 
+    tokenizer.build_combined_vocab(prot_seqs, smiles)
     input_tensor, vocab_size = tokenizer(prot_seqs, smiles)
     print(input_tensor.shape)
     
@@ -129,7 +132,11 @@ if __name__ == '__main__':
 
     # Create our input to the model to process
     input_tensor = torch.randint(0, vocab_size, (context_length, batch_size))
-
-    # Initialize the model with `num_layer` layers
-    model = MultiLayerTransformerDecoder(vocab_size, d_model, num_heads, ff_hidden_layer, dropout, num_layers)
+    input_tensor = fabric.to_device(input_tensor)
     
+    # Initialize the model with `num_layer` layers
+    model = MultiLayerTransformerDecoder(vocab_size, d_model, num_heads, ff_hidden_layer, dropout, num_layers, device=rank)
+    model = fabric.to_device(model)
+    
+    output = model(input_tensor)
+    print(output.shape)

@@ -176,7 +176,8 @@ class Tokenizer:
         max_len = 50
         for mol in mols:
             mol_ids = [self.token2id.get(char, self.token2id.get('<unk>')) for char in mol]
-            mol_ids = mol_ids[:max_len] + [self.token2id.get('<pad>')] * (max_len - len(mol_ids))
+            mol_ids = mol_ids[:max_len-2] + [self.token2id.get('<pad>')] * (max_len-2 - len(mol_ids))
+            mol_ids = [self.token2id.get('<bos>')] + mol_ids + [self.token2id.get('<eos>')]
             tokenized_mols.append(mol_ids)
 
         tokenized_mols = torch.tensor(tokenized_mols)
@@ -236,6 +237,7 @@ if __name__ == '__main__':
     encoded_prots = prot_tokenizer(prot_list, padding='max_length', truncation=True, max_length=20, return_tensors='pt')
     print(encoded_prots['input_ids'])
     print(prot_tokenizer.vocab_size)
+    print(prot_tokenizer.get_vocab())
     """
     
     # Example usage of Tokenizer
@@ -261,6 +263,7 @@ if __name__ == '__main__':
     encoded_texts, vocab_size = tokenizer(prot_list, molecule_list, use_loaded_vocab=True)
     print(encoded_texts[0])
     print(vocab_size)
+    print(tokenizer.combined_vocab)
 
     test_to_decode = [ 0, 20, 11,  9, 19, 15,  4,  7,  7,  7,  6,  5,  6,  6,  7,  6, 15,  8,
                         5,  4, 11, 12, 16,  4, 12, 16, 17, 21, 18,  7, 13,  9, 19, 13, 14, 11,
