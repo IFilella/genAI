@@ -21,7 +21,7 @@ class DecoderBlock(nn.Module):
     def __init__(self, d_model, num_heads, ff_hidden_layer, dropout, device):
         super(DecoderBlock, self).__init__()
 
-        self.self_attention = nn.MultiheadAttention(d_model, num_heads, dropout=dropout)
+        self.self_attention = nn.MultiheadAttention(d_model, num_heads, dropout=dropout, batch_first=True)
         self.norm1 = nn.LayerNorm(d_model)
         self.dropout1 = nn.Dropout(dropout)
         self.linear1 = nn.Linear(d_model, ff_hidden_layer)
@@ -33,6 +33,8 @@ class DecoderBlock(nn.Module):
     def forward(self, x,target_mask):
         target_mask = fabric.to_device(target_mask)
         x = fabric.to_device(x)
+        # x = x.permute(1, 0, 2)
+        # print('Target mask shape:', target_mask.shape)
         attn_output, _ = self.self_attention(x, x, x, attn_mask=target_mask)
         x = x + self.dropout1(attn_output)
         x = self.norm1(x)
@@ -70,6 +72,71 @@ def generate_square_subsequent_mask(sz):
     mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
     return mask
 
+# Create a mask that starts masking after the token with DELIM ID
+def create_partial_mask(sequence, token_id=33):
+    """ Example output with this function:
+        tensor([[0., 0., 0., 0., 0., 0., 0., 0., 0., 0.],
+                [0., 0., 0., 0., 0., 0., 0., 0., 0., 0.],
+                [0., 0., 0., 0., 0., 0., 0., 0., 0., 0.],
+                [0., 0., 0., 0., 0., 0., 0., 0., 0., 0.],
+                [0., 0., 0., 0., 0., -inf, -inf, -inf, -inf, -inf],
+                [0., 0., 0., 0., 0., 0., -inf, -inf, -inf, -inf],
+                [0., 0., 0., 0., 0., 0., 0., -inf, -inf, -inf],
+                [0., 0., 0., 0., 0., 0., 0., 0., -inf, -inf],
+                [0., 0., 0., 0., 0., 0., 0., 0., 0., -inf],
+                [0., 0., 0., 0., 0., 0., 0., 0., 0., 0.]])"""
+        
+    seq_length = sequence.size(1)
+    mask = torch.zeros(seq_length, seq_length)
+    for i in range(sequence.size(0)):
+        start_idx = (sequence[i] == token_id).nonzero(as_tuple=True)[0][0].item()
+        if start_idx < seq_length:
+            mask[start_idx:, start_idx:] = generate_square_subsequent_mask(seq_length - start_idx)
+    return mask
+
+def create_prefix_decoder_mask(sequence, token_id=33):
+    """
+    Create an attention mask for a prefix-decoder model.
+    - The tokens before the `token_id` (prefix) can only attend to themselves.
+    - The tokens after the prefix follow a standard subsequent mask.
+    - The tokens before the prefix cannot attend to the tokens after the prefix.
+    
+    Args:
+        sequence (torch.Tensor): Tensor of shape (batch_size, seq_len), containing tokenized sequences.
+        token_id (int): The token id marking the boundary between prefix and subsequent tokens.
+    
+    Returns:
+        torch.Tensor: The attention mask of shape (seq_len, seq_len).
+        
+        tensor([[0., 0., 0., 0., -inf, -inf, -inf, -inf, -inf, -inf],
+                [0., 0., 0., 0., -inf, -inf, -inf, -inf, -inf, -inf],
+                [0., 0., 0., 0., -inf, -inf, -inf, -inf, -inf, -inf],
+                [0., 0., 0., 0., -inf, -inf, -inf, -inf, -inf, -inf],
+                [0., 0., 0., 0., 0., -inf, -inf, -inf, -inf, -inf],
+                [0., 0., 0., 0., 0., 0., -inf, -inf, -inf, -inf],
+                [0., 0., 0., 0., 0., 0., 0., -inf, -inf, -inf],
+                [0., 0., 0., 0., 0., 0., 0., 0., -inf, -inf],
+                [0., 0., 0., 0., 0., 0., 0., 0., 0., -inf],
+                [0., 0., 0., 0., 0., 0., 0., 0., 0., 0.]])
+    """
+    batch_size, seq_length = sequence.size()
+    mask = torch.zeros(seq_length, seq_length)
+
+    # Loop over each sequence in the batch
+    for i in range(batch_size):
+        # Find the index of the prefix token
+        start_idx = (sequence[i] == token_id).nonzero(as_tuple=True)[0][0].item()
+
+        # Apply subsequent mask for the tokens after the prefix
+        if start_idx < seq_length:
+            subsequent_mask = generate_square_subsequent_mask(seq_length - start_idx)
+            mask[start_idx:, start_idx:] = subsequent_mask
+        
+        # Apply -inf to prevent the prefix (rows 0 to start_idx-1) from attending to tokens after the prefix (columns start_idx to seq_length-1)
+        mask[:start_idx, start_idx:] = float('-inf')
+
+    return mask
+
 # Multilayer Decoder
 # This model has multiple decoder blocks stacked on top of each other
 class MultiLayerTransformerDecoder(nn.Module):
@@ -86,15 +153,21 @@ class MultiLayerTransformerDecoder(nn.Module):
         self.softmax = nn.LogSoftmax(dim=-1)
         self.device = device
 
-    def forward(self, x):
+    def forward(self, x, delim_tokenidx):
         x = x.long().clone()
         x = fabric.to_device(x)
+        
+        mask = create_prefix_decoder_mask(x, delim_tokenidx)
+        
         x = self.embedding(x)
         x = self.pos_encoder(x)
+        
         for transformer_block in self.transformer_blocks:
-            target_mask = generate_square_subsequent_mask(x.size(0))
-            target_mask = fabric.to_device(target_mask)
+            # Generate a mask to prevent attention to future positions
+            # We mask just the molecules (the second half of the input)
+            target_mask = fabric.to_device(mask)
             x = transformer_block(x,target_mask)
+            
         output = self.linear(x)
         output = self.softmax(output)
         return output
@@ -102,8 +175,6 @@ class MultiLayerTransformerDecoder(nn.Module):
 
 if __name__ == '__main__':
     
-    mask = generate_square_subsequent_mask(sz=5)
-    print(mask)
     
     # TEST THE TOKENIZER CLASS
     
@@ -111,11 +182,35 @@ if __name__ == '__main__':
     from data.fake_data import texts
     prot_seqs = [text.split('$')[0] for text in texts]
     smiles = [text.split('$')[1] for text in texts]
-
+    
     tokenizer.build_combined_vocab(prot_seqs, smiles)
     input_tensor, vocab_size = tokenizer(prot_seqs, smiles)
-    print(input_tensor.shape)
     
+    # Test masking functions
+    """
+    input_tensor = torch.tensor([[10, 39, 30, 25, 33, 15,  6,  5, 34,  9],
+                                [37, 20,  1, 28, 33, 14, 45, 44, 48, 16],
+                                [48,  8, 35, 37, 33, 38,  0, 35, 47, 11],
+                                [36, 28, 18, 39, 33,  0, 34, 24, 30, 40],
+                                [15, 32, 32, 21, 33,  1, 48, 40, 41, 31],
+                                [45, 34, 27, 27, 33,  4, 38, 40, 37,  5],
+                                [36, 47, 15, 45, 33,  0, 21, 44,  9, 16],
+                                [27, 25, 39, 48, 33,  5, 11, 28,  8, 11],
+                                [ 6, 41,  5, 42, 33, 21, 27, 14, 41,  7],
+                                [35, 45, 22, 48, 33, 29, 27, 39,  8, 45]])
+    
+    print('Input tensor shape:', input_tensor.shape)
+    print(input_tensor)
+    
+    delim_tokenidx = tokenizer.combined_vocab['<DELIM>']
+    mask = create_partial_mask(input_tensor, delim_tokenidx)
+    print('Mask shape:', mask.shape)
+    print(mask)
+    
+    mask2 = create_prefix_decoder_mask(input_tensor, delim_tokenidx)
+    print('Mask2 shape:', mask2.shape)
+    print(mask2)
+    """
     
     # TEST THE MULTI LAYER TRANSFORMER DECODER
     
@@ -126,17 +221,18 @@ if __name__ == '__main__':
     num_heads      = 2
     ff_hidden_layer  = 8*d_model
     dropout        = 0.1
-    num_layers     = 12
+    num_layers     = 4
     context_length = 1000
     batch_size     = 1
 
     # Create our input to the model to process
-    input_tensor = torch.randint(0, vocab_size, (context_length, batch_size))
+    #input_tensor = torch.randint(0, vocab_size, (context_length, batch_size))
     input_tensor = fabric.to_device(input_tensor)
+    print('Input tensor shape:', input_tensor.shape)
     
     # Initialize the model with `num_layer` layers
     model = MultiLayerTransformerDecoder(vocab_size, d_model, num_heads, ff_hidden_layer, dropout, num_layers, device=rank)
     model = fabric.to_device(model)
     
-    output = model(input_tensor)
+    output = model(input_tensor, tokenizer.combined_vocab['<DELIM>'])
     print(output.shape)
