@@ -12,7 +12,7 @@ from torchinfo import summary
 from tokenizer import Tokenizer
 from lightning.fabric import Fabric
 
-fabric = Fabric(accelerator='cuda', devices=1, num_nodes=1)
+fabric = Fabric(accelerator='cuda', devices=2, num_nodes=1)
 fabric.launch()
 rank = fabric.global_rank
     

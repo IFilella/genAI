@@ -100,7 +100,7 @@ def train_model(prot_seqs,
     
     assert model.linear.out_features == vocab_size, f"Expected output layer size {combined_vocab_size}, but got {model.linear.out_features}"
     
-    # Print model information
+    # Print model information (the 1000 is not the real input size, it is just a placeholder)
     if verbose:
         summary(model, (1000, batch_size), col_names=["input_size", "output_size", "num_params"])
     
@@ -148,7 +148,7 @@ def train_model(prot_seqs,
             optimizer.zero_grad()
             
             input_tensor = input_tensor.clone().detach()
-            logits = model(input_tensor)
+            logits = model(input_tensor, tokenizer.combined_vocab['<DELIM>'])
 
             # Reshape the logits and labels for loss calculation
             logits = logits.view(-1, vocab_size)
@@ -180,7 +180,7 @@ def train_model(prot_seqs,
             for batch in val_dataloader:
                 input_tensor = batch[0]
                 input_tensor = input_tensor.clone().detach()
-                logits = model(input_tensor)
+                logits = model(input_tensor, tokenizer.combined_vocab['<DELIM>'])
 
                 # Reshape the logits and labels for loss calculation
                 logits = logits.view(-1, vocab_size)
@@ -272,7 +272,7 @@ def main():
     train_model(prots, mols, prot_tokenizer_name, mol_tokenizer_name,
                 num_epochs, learning_rate, batch_size, d_model, num_heads, ff_hidden_layer,
                 dropout, num_layers, loss_function, optimizer, weights_path, get_wandb,
-                teacher_forcing, validation_split, num_gpus, verbose=True)
+                teacher_forcing, validation_split, num_gpus, verbose=False)
     
     timef = time.time() - time0
     print('Time taken:', timef)
