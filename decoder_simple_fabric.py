@@ -15,7 +15,7 @@ from lightning.fabric import Fabric
 fabric = Fabric(accelerator='cuda', devices=2, num_nodes=1)
 fabric.launch()
 rank = fabric.global_rank
-    
+
 # Decoder Block
 class DecoderBlock(nn.Module):
     def __init__(self, d_model, num_heads, ff_hidden_layer, dropout, device):
@@ -29,7 +29,7 @@ class DecoderBlock(nn.Module):
         self.norm2 = nn.LayerNorm(d_model)
         self.dropout2 = nn.Dropout(dropout)
         self.device = device
-    
+
     def forward(self, x,target_mask):
         target_mask = fabric.to_device(target_mask)
         x = fabric.to_device(x)
@@ -42,7 +42,7 @@ class DecoderBlock(nn.Module):
         x = x + self.dropout2(ff_output)
         x = self.norm2(x)
         return x
-    
+
 # Positional Encoding
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, dropout=0.1, max_len=5000, device=0):
@@ -64,7 +64,7 @@ class PositionalEncoding(nn.Module):
         self.pe = fabric.to_device(self.pe)
         x = x + self.pe[:x.size(0), :]
         return self.dropout(x)
-    
+
 # We need to mask out input decoders to prevent attention to future positions
 def generate_square_subsequent_mask(sz):
     """Generate a mask to prevent attention to future positions."""
@@ -85,7 +85,7 @@ def create_partial_mask(sequence, token_id=33):
                 [0., 0., 0., 0., 0., 0., 0., 0., -inf, -inf],
                 [0., 0., 0., 0., 0., 0., 0., 0., 0., -inf],
                 [0., 0., 0., 0., 0., 0., 0., 0., 0., 0.]])"""
-        
+
     seq_length = sequence.size(1)
     mask = torch.zeros(seq_length, seq_length)
     for i in range(sequence.size(0)):
@@ -100,14 +100,14 @@ def create_prefix_decoder_mask(sequence, token_id=33):
     - The tokens before the `token_id` (prefix) can only attend to themselves.
     - The tokens after the prefix follow a standard subsequent mask.
     - The tokens before the prefix cannot attend to the tokens after the prefix.
-    
+
     Args:
         sequence (torch.Tensor): Tensor of shape (batch_size, seq_len), containing tokenized sequences.
         token_id (int): The token id marking the boundary between prefix and subsequent tokens.
-    
+
     Returns:
         torch.Tensor: The attention mask of shape (seq_len, seq_len).
-        
+
         tensor([[0., 0., 0., 0., -inf, -inf, -inf, -inf, -inf, -inf],
                 [0., 0., 0., 0., -inf, -inf, -inf, -inf, -inf, -inf],
                 [0., 0., 0., 0., -inf, -inf, -inf, -inf, -inf, -inf],
@@ -131,7 +131,7 @@ def create_prefix_decoder_mask(sequence, token_id=33):
         if start_idx < seq_length:
             subsequent_mask = generate_square_subsequent_mask(seq_length - start_idx)
             mask[start_idx:, start_idx:] = subsequent_mask
-        
+
         # Apply -inf to prevent the prefix (rows 0 to start_idx-1) from attending to tokens after the prefix (columns start_idx to seq_length-1)
         mask[:start_idx, start_idx:] = float('-inf')
 
@@ -156,36 +156,36 @@ class MultiLayerTransformerDecoder(nn.Module):
     def forward(self, x, delim_tokenidx):
         x = x.long().clone()
         x = fabric.to_device(x)
-        
+
         mask = create_prefix_decoder_mask(x, delim_tokenidx)
-        
+
         x = self.embedding(x)
         x = self.pos_encoder(x)
-        
+
         for transformer_block in self.transformer_blocks:
             # Generate a mask to prevent attention to future positions
             # We mask just the molecules (the second half of the input)
             target_mask = fabric.to_device(mask)
             x = transformer_block(x,target_mask)
-            
+
         output = self.linear(x)
         output = self.softmax(output)
         return output
 
 
 if __name__ == '__main__':
-    
-    
+
+
     # TEST THE TOKENIZER CLASS
-    
+
     tokenizer = Tokenizer()
     from data.fake_data import texts
     prot_seqs = [text.split('$')[0] for text in texts]
     smiles = [text.split('$')[1] for text in texts]
-    
+
     tokenizer.build_combined_vocab(prot_seqs, smiles)
     input_tensor, vocab_size = tokenizer(prot_seqs, smiles)
-    
+
     # Test masking functions
     """
     input_tensor = torch.tensor([[10, 39, 30, 25, 33, 15,  6,  5, 34,  9],
@@ -198,22 +198,22 @@ if __name__ == '__main__':
                                 [27, 25, 39, 48, 33,  5, 11, 28,  8, 11],
                                 [ 6, 41,  5, 42, 33, 21, 27, 14, 41,  7],
                                 [35, 45, 22, 48, 33, 29, 27, 39,  8, 45]])
-    
+
     print('Input tensor shape:', input_tensor.shape)
     print(input_tensor)
-    
+
     delim_tokenidx = tokenizer.combined_vocab['<DELIM>']
     mask = create_partial_mask(input_tensor, delim_tokenidx)
     print('Mask shape:', mask.shape)
     print(mask)
-    
+
     mask2 = create_prefix_decoder_mask(input_tensor, delim_tokenidx)
     print('Mask2 shape:', mask2.shape)
     print(mask2)
     """
-    
+
     # TEST THE MULTI LAYER TRANSFORMER DECODER
-    
+
     # Follow the same process as before
     # Define the hyperparameters
     vocab_size     = 10000
@@ -229,10 +229,11 @@ if __name__ == '__main__':
     #input_tensor = torch.randint(0, vocab_size, (context_length, batch_size))
     input_tensor = fabric.to_device(input_tensor)
     print('Input tensor shape:', input_tensor.shape)
-    
+
     # Initialize the model with `num_layer` layers
     model = MultiLayerTransformerDecoder(vocab_size, d_model, num_heads, ff_hidden_layer, dropout, num_layers, device=rank)
     model = fabric.to_device(model)
-    
+
     output = model(input_tensor, tokenizer.combined_vocab['<DELIM>'])
     print(output.shape)
+

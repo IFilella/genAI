@@ -36,7 +36,7 @@ def train_model(prot_seqs,
                 num_gpus=2,
                 verbose=False
                 ):
-    
+
     """
     Train the model using the specified hyperparameters.
 
@@ -62,48 +62,48 @@ def train_model(prot_seqs,
         num_gpus (int, optional): The number of GPUs to use. Defaults to 2.
         verbose (bool, optional): Whether to print model information. Defaults to False.
     """
-        
+
     fabric = Fabric(accelerator='cuda', devices=num_gpus, num_nodes=1)
     fabric.launch()
-    
-    rank = fabric.global_rank 
+
+    rank = fabric.global_rank
     print(rank)
-    
+
     # prepare the dataset (distributed)
     print('[Rank %d] Preparing the dataset...'%rank)
-    
+
     # Here I create the vocab file beacuse I need to have the same vocab length for all the processes
     if fabric.global_rank == 0:
         tokenizer = Tokenizer()
         tokenizer.build_combined_vocab(prot_seqs, smiles)
         tokenizer.save_combined_vocab('combined_vocab.json')
     fabric.barrier()
-    
+
     # With the previously vocab file, I can load the vocab and create the input tensor
     tokenizer = Tokenizer()
     tokenizer.load_combined_vocab('combined_vocab.json')
     input_tensor, vocab_size = tokenizer(prot_seqs, smiles, use_loaded_vocab=True)
-    
+
     # Split the dataset into training and validation sets
     print('[Rank %d] Splitting the dataset...'%rank)
     dataset = TensorDataset(input_tensor)
     val_size = int(validation_split * len(dataset))
     train_size = len(dataset) - val_size
     train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
-    
+
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
-    
+
     # Model
     print('[Rank %d] Initializing the model...'%rank)
     model = MultiLayerTransformerDecoder(vocab_size, d_model, num_heads, ff_hidden_layer, dropout, num_layers, device=rank)
-    
+
     assert model.linear.out_features == vocab_size, f"Expected output layer size {combined_vocab_size}, but got {model.linear.out_features}"
-    
+
     # Print model information (the 1000 is not the real input size, it is just a placeholder)
     if verbose:
         summary(model, (1000, batch_size), col_names=["input_size", "output_size", "num_params"])
-    
+
     # TO DO: Add support for other loss functions and optimizers
     # Loss function
     padding_token_id = tokenizer.combined_vocab['<pad>'] # Ensure that padding tokens are masked during training to prevent the model from learning to generate them.
@@ -111,63 +111,63 @@ def train_model(prot_seqs,
         criterion = nn.CrossEntropyLoss(ignore_index=padding_token_id)
     else:
         raise ValueError('Invalid loss function. Please use "crossentropy"')
-    
+
     # Optimizer
     if optimizer == 'Adam':
         optimizer = optim.Adam(model.parameters(), lr=lr)
     else:
         raise ValueError('Invalid optimizer. Please use "Adam"')
-    
+
     # Distribute the model to all available GPUs (using Fabric)
     model, optimizer = fabric.setup(model, optimizer)
     train_dataloader = fabric.setup_dataloaders(train_dataloader)
     val_dataloader = fabric.setup_dataloaders(val_dataloader)
-    
+
     # Start the training loop
     print('[Rank %d] Starting the training loop...'%rank)
     best_val_accuracy = 0
 
     for epoch in range(num_epochs):
-        
+
         model.train()
-        
+
         total_train_loss = 0
         total_train_correct = 0
         total_train_samples = 0
-        
+
         for batch in train_dataloader:
             input_tensor = batch[0]
-            
-            # Generate the shifted input tensor for teacher forcing            
+
+            # Generate the shifted input tensor for teacher forcing
             if teacher_forcing:
                 input_tensor_shifted = torch.cat([torch.zeros_like(input_tensor[:, :1]), input_tensor[:, :-1]], dim=1)
                 input_tensor = input_tensor_shifted
             else:
                 input_tensor = input_tensor
-            
+
             optimizer.zero_grad()
-            
+
             input_tensor = input_tensor.clone().detach()
             logits = model(input_tensor, tokenizer.combined_vocab['<DELIM>'])
 
             # Reshape the logits and labels for loss calculation
             logits = logits.view(-1, vocab_size)
             labels = input_tensor.view(-1)
-                
+
             loss = criterion(logits, labels)
-        
+
             #loss.backward()
             fabric.backward(loss)
             optimizer.step()
-        
+
             _, preds = torch.max(logits, dim=1)
             total_train_correct += (preds == labels).sum().item()
             total_train_samples += labels.numel()
 
             total_train_loss += loss.item()
-            
+
         train_acc = total_train_correct / total_train_samples
-            
+
         print(f"[Rank {rank}] Epoch {epoch+1}/{num_epochs}, Train Loss: {total_train_loss}, Train Accuracy: {train_acc}")
 
         # validation
@@ -175,7 +175,7 @@ def train_model(prot_seqs,
         total_val_loss = 0
         total_val_correct = 0
         total_val_samples = 0
-        
+
         with torch.no_grad():
             for batch in val_dataloader:
                 input_tensor = batch[0]
@@ -185,42 +185,42 @@ def train_model(prot_seqs,
                 # Reshape the logits and labels for loss calculation
                 logits = logits.view(-1, vocab_size)
                 labels = input_tensor.view(-1)
-                
+
                 loss = criterion(logits, labels)
-                
+
                 _, preds = torch.max(logits, dim=1)
                 total_val_correct += (preds == labels).sum().item()
                 total_val_samples += labels.numel()
 
                 total_val_loss += loss.item()
-                
+
         val_acc = total_val_correct / total_val_samples
-        
+
         print(f"[Rank {rank}] Epoch {epoch+1}/{num_epochs}, Validation Loss: {total_val_loss}, Validation Accuracy: {val_acc}")
-        
+
         if get_wandb:
             # log metrics to wandb
             wandb.log({"Epoch": epoch+1, "Train Loss": total_train_loss, "Train Accuracy": train_acc,
                         "Validation Loss": total_val_loss, "Validation Accuracy": val_acc})
-            
+
         # Save the model weights if validation accuracy improves
         if val_acc > best_val_accuracy:
             best_val_accuracy = val_acc
             torch.save(model.state_dict(), weights_path)
-        
+
     print('[Rank %d] Training complete!'%rank)
-    
+
 def main():
-    
+
     time0 = time.time()
-    
+
     parser = argparse.ArgumentParser(description='Train a Transformer Decoder model')
     parser.add_argument('--config', type=str, default='config.yaml', help='Path to the configuration YAML file with all the parameters', required=True)
     args = parser.parse_args()
-    
+
     with open(args.config, 'r') as file:
         config = yaml.safe_load(file)
-    
+
     # Get the data (in this case, it is sampled)
     df = pd.read_csv(config['data_path'])
     df = df.sample(1000)
@@ -228,7 +228,7 @@ def main():
     mols = df[config['col_mols']].tolist()
     prot_tokenizer_name = config['protein_tokenizer']
     mol_tokenizer_name = config['smiles_tokenizer']
-    
+
     # Define the hyperparameters
     d_model        = config['d_model']
     num_heads      = config['num_heads']
@@ -245,7 +245,7 @@ def main():
     validation_split = config['validation_split']
     get_wandb      = config['get_wandb']
     num_gpus       = config['num_gpus']
-    
+
     # Configure wandb
     if get_wandb:
         # start a new wandb run to track this script
@@ -267,20 +267,21 @@ def main():
             "dataset": "BindingDB_sample10000",
             }
         )
-    
+
     # Train the model
     train_model(prots, mols, prot_tokenizer_name, mol_tokenizer_name,
                 num_epochs, learning_rate, batch_size, d_model, num_heads, ff_hidden_layer,
                 dropout, num_layers, loss_function, optimizer, weights_path, get_wandb,
                 teacher_forcing, validation_split, num_gpus, verbose=False)
-    
+
     timef = time.time() - time0
     print('Time taken:', timef)
-    
-    
+
+
 if __name__ == '__main__':
-    
+
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
-    
+
     main()
-    
+
+
