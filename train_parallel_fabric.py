@@ -144,19 +144,29 @@ def train_model(prot_seqs,
                 input_tensor = input_tensor_shifted
             else:
                 input_tensor = input_tensor
-
+                        
             optimizer.zero_grad()
 
             input_tensor = input_tensor.clone().detach()
             logits = model(input_tensor, tokenizer.combined_vocab['<DELIM>'])
 
-            # Reshape the logits and labels for loss calculation
-            logits = logits.view(-1, vocab_size)
-            labels = input_tensor.view(-1)
-
+            # calculate the loss just for the second part (after the delimiter)
+            # mask after the delimiter
+            batch_size = input_tensor.size(0)
+            loss_mask = torch.zeros_like(input_tensor, dtype=torch.bool)
+            for i in range(batch_size):
+                delim_idx = (input_tensor[i] == tokenizer.combined_vocab['<DELIM>']).nonzero(as_tuple=True)
+                if len(delim_idx[0]) > 0:
+                    start_idx = delim_idx[0].item() + 1
+                    loss_mask[i, start_idx:] = True
+                    
+            # Apply mask to the logits and labels
+            logits = logits.view(batch_size, -1, vocab_size)
+            logits = logits[loss_mask]
+            labels = input_tensor[loss_mask]
+            
+            # Compute the loss
             loss = criterion(logits, labels)
-
-            #loss.backward()
             fabric.backward(loss)
             optimizer.step()
 
@@ -182,10 +192,20 @@ def train_model(prot_seqs,
                 input_tensor = input_tensor.clone().detach()
                 logits = model(input_tensor, tokenizer.combined_vocab['<DELIM>'])
 
-                # Reshape the logits and labels for loss calculation
-                logits = logits.view(-1, vocab_size)
-                labels = input_tensor.view(-1)
-
+                # Mask after the delimiter
+                batch_size = input_tensor.size(0)
+                loss_mask = torch.zeros_like(input_tensor, dtype=torch.bool)
+                for i in range(batch_size):
+                    delim_idx = (input_tensor[i] == tokenizer.combined_vocab['<DELIM>']).nonzero(as_tuple=True)
+                    if len(delim_idx[0]) > 0:
+                        start_idx = delim_idx[0].item() + 1
+                        loss_mask[i, start_idx:] = True
+                
+                logits = logits.view(batch_size, -1, vocab_size)
+                logits = logits[loss_mask]
+                labels = input_tensor[loss_mask]
+                
+                # Compute the loss
                 loss = criterion(logits, labels)
 
                 _, preds = torch.max(logits, dim=1)
