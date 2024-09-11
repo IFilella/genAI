@@ -170,14 +170,16 @@ class Tokenizer:
             raise ValueError('Combined vocabulary not loaded. Load the combined vocabulary before tokenizing.\
                             This way, you will avoid problems of different length when trying to distribute processes.')
         
-        tokenized_prots = self.prot_tokenizer(prots, padding='max_length', truncation=True, max_length=450, return_tensors='pt')
+        tokenized_prots = self.prot_tokenizer(prots, padding='max_length', truncation=True, max_length=540, return_tensors='pt')
         
         tokenized_mols = []
         max_len = 50
         for mol in mols:
             mol_ids = [self.token2id.get(char, self.token2id.get('<unk>')) for char in mol]
-            mol_ids = mol_ids[:max_len-2] + [self.token2id.get('<pad>')] * (max_len-2 - len(mol_ids))
+            if len(mol_ids) > max_len - 2:
+                mol_ids = mol_ids[:max_len-2]
             mol_ids = [self.token2id.get('<bos>')] + mol_ids + [self.token2id.get('<eos>')]
+            mol_ids += [self.token2id.get('<pad>')] * (max_len - len(mol_ids))
             tokenized_mols.append(mol_ids)
 
         tokenized_mols = torch.tensor(tokenized_mols)
@@ -264,7 +266,7 @@ if __name__ == '__main__':
     print(encoded_texts[0])
     print(vocab_size)
     print(tokenizer.combined_vocab)
-
+    
     test_to_decode = [ 0, 20, 11,  9, 19, 15,  4,  7,  7,  7,  6,  5,  6,  6,  7,  6, 15,  8,
                         5,  4, 11, 12, 16,  4, 12, 16, 17, 21, 18,  7, 13,  9, 19, 13, 14, 11,
                         12,  9, 13,  8, 19, 10, 15, 16,  7,  7, 12, 13,  6,  9, 11,  7, 14, 20,
@@ -290,8 +292,13 @@ if __name__ == '__main__':
                         1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,
                         1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,
                         1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,
-                        33, 23, 23, 34, 35, 28, 36, 28, 23, 37, 35, 23, 23, 35, 23, 23, 35, 23,
-                        37,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,
+                        1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,
+                        1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,
+                        1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,
+                        1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,
+                        1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,
+                        33, 48, 23, 23, 34, 35, 28, 36, 28, 23, 37, 35, 23, 23, 35, 23, 23, 35,
+                        23, 37,  2,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,
                         1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1]
     
     decoded_text = tokenizer.decode(test_to_decode, skip_special_tokens=True)
