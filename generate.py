@@ -10,7 +10,7 @@ import time
 
 
 # Generate new text (SMILES strings) using the model
-def generate_smiles(model, sequence, delim='$', max_length=50, temperature=1.0, device='cuda'):
+def generate_smiles(model, sequence, delim='<DELIM>', max_length=50, temperature=1.0, device='cuda'):
     model.to(device)
     model.eval()  # Set the model to evaluation mode
 
@@ -19,24 +19,22 @@ def generate_smiles(model, sequence, delim='$', max_length=50, temperature=1.0, 
     tokenizer.load_combined_vocab('combined_vocab.json')
     
     # tokenize the protein sequence according to the loaded combined vocab
-    tokenized_prot = []
-    max_len = 450
-    seq = sequence + delim
-    prot_ids = [tokenizer.token2id.get(char, tokenizer.token2id.get('<unk>')) for char in seq]
-    prot_ids = prot_ids[:max_len] + [tokenizer.token2id.get('<pad>')] * (max_len - len(prot_ids))
-    tokenized_prot.append(prot_ids)
-    input_tensor = torch.tensor(tokenized_prot)
+    max_seq_len = 540
+    prot_ids = [tokenizer.token2id['<cls>']] + [tokenizer.token2id.get(char, tokenizer.token2id.get('<unk>')) for char in sequence]
+    prot_ids = prot_ids[:max_seq_len - 2] + [tokenizer.token2id['<eos>']] + [tokenizer.token2id.get('<pad>')] * (max_seq_len - len(prot_ids) - 1)
+    
+    delim_ids = tokenizer.token2id[delim]
+    tokenized_input = prot_ids + [delim_ids]
+    
+    input_tensor = torch.tensor(tokenized_input).unsqueeze(0)
     input_tensor = input_tensor.to(device)
     #print('Input tensor shape: ', input_tensor.shape)
-    
+
     generated_tokens = []
     with torch.no_grad():
         for _ in range(max_length):
             # Predict the next token
             logits = model(input_tensor)
-            
-            # next_token_logits = logits[:, -1, :]  # Get logits for the last token in the sequence
-            # next_token_id = torch.argmax(next_token_logits, dim=1).item() # Get the predicted token id
                         
             next_token_logits = logits[:, -1, :] / temperature
             next_token_probs = F.softmax(next_token_logits, dim=-1)
@@ -57,8 +55,6 @@ def generate_smiles(model, sequence, delim='$', max_length=50, temperature=1.0, 
             input_tensor = torch.cat([input_tensor, next_token_tensor], dim=1)
 
     # Decode the generated token ids
-    #print(generated_tokens)
-    
     generated_smiles = tokenizer.decode(generated_tokens, skip_special_tokens=True)
     
     return generated_smiles
@@ -82,14 +78,14 @@ if __name__ == '__main__':
     num_heads      = 8
     ff_hidden_layer  = 4*d_model
     dropout        = 0.1
-    num_layers     = 4
-    batch_size     = 100
+    num_layers     = 3
+    batch_size     = 256
     num_epochs     = 10
     learning_rate  = 0.0001
-    weights_path   = 'weights/model_weights_test1-1.pth'
+    weights_path   = 'weights/model_weights_test2-1.pth'
 
     # Define the vocabulary size from the combined vocab file (also from training!)
-    vocab_size = 71
+    vocab_size = 74
     
     # Instantiate the model
     model = MultiLayerTransformerDecoder(vocab_size, d_model, num_heads, ff_hidden_layer, dropout, num_layers, device)
@@ -105,9 +101,9 @@ if __name__ == '__main__':
     sequence = 'MEQPQEEAPEVREEEEKEEVAEAEGAPELNGGPQHALPSSSYTDLSRSSSPPSLLDQLQMGCDGASCGSLNMECRVCGDKASGFHYGVHACEGCKGFFRRTIRMKLEYEKCERSCKIQKKNRNKCQYCRFQKCLALGMSHNAIRFGRMPEAEKRKLVAGLTANEGSQYNPQVADLKAFSKHIYNAYLKNFNMTKKKARSILTGKASHTAPFVIHDIETLWQAEKGLVWKQLVNGLPPYKEISVHVFYRCQCTTVETVRELTEFAKSIPSFSSLFLNDQVTLLKYGVHEAIFAMLASIVNKDGLLVANGSGFVTREFLRSLRKPFSDIIEPKFEFAVKFNALELDDSDLALFIAAIILCGDRPGLMNVPRVEAIQDTILRALEFHLQANHPDAQYLFPKLLQKMADLRQLVTEHAQMMQRIKKTETETSLHPLLQEIYKDMY'
     print(len(sequence))
     generated_smiles = generate_smiles(model, sequence,
-                                        delim='$', max_length=100,
-                                        temperature=2.0, device=device)
+                                        delim='<DELIM>', max_length=100,
+                                        temperature=1.0, device=device)
     print(generated_smiles)
     
-    some_generated_smiles = generate(10, sequence, delim='$', max_length=100, temperature=1.0, device=device)
+    some_generated_smiles = generate(10, sequence, delim='<DELIM>', max_length=100, temperature=1.0, device=device)
     print(some_generated_smiles)
