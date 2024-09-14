@@ -139,15 +139,25 @@ def train_model(prot_seqs,
             input_tensor = batch[0]
 
             # Generate the shifted input tensor for teacher forcing
+            # Apply teacher forcing only ofter the delimiter token
+            batch_size = input_tensor.size(0)
+            input_tensor_shifted = input_tensor.clone()
+            
             if teacher_forcing:
-                input_tensor_shifted = torch.cat([torch.zeros_like(input_tensor[:, :1]), input_tensor[:, :-1]], dim=1)
+                for i in range(batch_size):
+                    delim_idx = (input_tensor[i] == tokenizer.combined_vocab['<DELIM>']).nonzero(as_tuple=True)
+                    if len(delim_idx[0]) > 0:
+                        start_idx = delim_idx[0].item() + 1
+                        if start_idx < input_tensor.size(1):
+                            input_tensor_shifted[i, start_idx:] = torch.cat([torch.zeros_like(input_tensor[i, start_idx:start_idx+1]), input_tensor[i, start_idx:-1]], dim=0)
                 input_tensor = input_tensor_shifted
+            
             else:
                 input_tensor = input_tensor
                         
             optimizer.zero_grad()
 
-            input_tensor = input_tensor.clone().detach()
+            input_tensor = input_tensor.detach()
             logits = model(input_tensor, tokenizer.combined_vocab['<DELIM>'])
 
             # calculate the loss just for the second part (after the delimiter)

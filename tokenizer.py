@@ -22,6 +22,7 @@ class MolecularTokenizer:
 
     def build_vocab(self, molecule_list):
 
+        molecule_list = [str(mol) for mol in molecule_list]
         total_chars = Counter(chain(*molecule_list))
         self.vocab = list(total_chars.keys()) + self.special_tokens
         self.vocab_size = len(self.vocab)
@@ -175,6 +176,7 @@ class Tokenizer:
         tokenized_mols = []
         max_len = 50
         for mol in mols:
+            mols = [str(mol) for mol in mols]
             mol_ids = [self.token2id.get(char, self.token2id.get('<unk>')) for char in mol]
             if len(mol_ids) > max_len - 2:
                 mol_ids = mol_ids[:max_len-2]
