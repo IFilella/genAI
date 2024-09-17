@@ -1,5 +1,5 @@
 
-data_path: 'data/data_seqmol_BindingDB_filt.csv'
+data_path: 'data/data_ChEMBL_BindingDB_sort.csv'
 col_prots: 'Sequence'
 col_mols: 'SMILES'
 protein_tokenizer: 'facebook/esm2_t33_650M_UR50'
@@ -9,7 +9,7 @@ num_heads: 8
 ff_hidden_layer: 4096
 dropout: 0.1
 num_layers: 4
-batch_size: 8
+batch_size: 10
 num_epochs: 10
 learning_rate: 0.0001
 loss_function: 'crossentropy'
@@ -20,3 +20,4 @@ validation_split: 0.2
 get_wandb: False
 wandb_project: 'train_decoder_parallel'
 num_gpus: 2
+verbose: True

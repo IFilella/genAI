@@ -104,7 +104,7 @@ def train_model(prot_seqs,
 
     # Print model information (the 1000 is not the real input size, it is just a placeholder)
     if verbose:
-        summary(model, (1000, batch_size), col_names=["input_size", "output_size", "num_params"])
+        summary(model)
 
     # TO DO: Add support for other loss functions and optimizers
     # Loss function
@@ -238,10 +238,11 @@ def train_model(prot_seqs,
         if val_acc > best_val_accuracy:
             best_val_accuracy = val_acc
             torch.save(model.state_dict(), weights_path)
-    
+
     print('[Rank %d] Training complete!'%rank)
     
-    torch.cuda.memory._dump_snapshot('memory_snapshot.pickle')
+    if verbose:
+        torch.cuda.memory._dump_snapshot('memory_snapshot.pickle')
     torch.cuda.memory._record_memory_history(enabled=None)
 
 def main():
@@ -279,6 +280,7 @@ def main():
     validation_split = config['validation_split']
     get_wandb      = config['get_wandb']
     num_gpus       = config['num_gpus']
+    verbose        = config['verbose']
 
     # Configure wandb
     if get_wandb:
@@ -298,7 +300,7 @@ def main():
             "dropout": dropout,
             "num_layers": num_layers,
             "architecture": "Decoder-only",
-            "dataset": "BindingDB_sample10000",
+            "dataset": "ChEMBL_BindingDB_sorted_sample10000",
             }
         )
 
@@ -306,7 +308,7 @@ def main():
     train_model(prots, mols, prot_tokenizer_name, mol_tokenizer_name,
                 num_epochs, learning_rate, batch_size, d_model, num_heads, ff_hidden_layer,
                 dropout, num_layers, loss_function, optimizer, weights_path, get_wandb,
-                teacher_forcing, validation_split, num_gpus, verbose=False)
+                teacher_forcing, validation_split, num_gpus, verbose)
     
     timef = time.time() - time0
     print('Time taken:', timef)
