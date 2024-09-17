@@ -69,6 +69,8 @@ def train_model(prot_seqs,
     rank = fabric.global_rank
     print(rank)
 
+    torch.cuda.memory._record_memory_history(max_entries=100000)
+    
     # prepare the dataset (distributed)
     print('[Rank %d] Preparing the dataset...'%rank)
 
@@ -91,7 +93,7 @@ def train_model(prot_seqs,
     train_size = len(dataset) - val_size
     train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
 
-    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False)
     val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
     # Model
@@ -154,8 +156,6 @@ def train_model(prot_seqs,
             
             else:
                 input_tensor = input_tensor
-                        
-            optimizer.zero_grad()
 
             input_tensor = input_tensor.detach()
             logits = model(input_tensor, tokenizer.combined_vocab['<DELIM>'])
@@ -179,6 +179,7 @@ def train_model(prot_seqs,
             loss = criterion(logits, labels)
             fabric.backward(loss)
             optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
 
             _, preds = torch.max(logits, dim=1)
             total_train_correct += (preds == labels).sum().item()
@@ -189,7 +190,7 @@ def train_model(prot_seqs,
         train_acc = total_train_correct / total_train_samples
 
         print(f"[Rank {rank}] Epoch {epoch+1}/{num_epochs}, Train Loss: {total_train_loss}, Train Accuracy: {train_acc}")
-
+    
         # validation
         model.eval()
         total_val_loss = 0
@@ -237,8 +238,11 @@ def train_model(prot_seqs,
         if val_acc > best_val_accuracy:
             best_val_accuracy = val_acc
             torch.save(model.state_dict(), weights_path)
-
+    
     print('[Rank %d] Training complete!'%rank)
+    
+    torch.cuda.memory._dump_snapshot('memory_snapshot.pickle')
+    torch.cuda.memory._record_memory_history(enabled=None)
 
 def main():
 
@@ -303,7 +307,7 @@ def main():
                 num_epochs, learning_rate, batch_size, d_model, num_heads, ff_hidden_layer,
                 dropout, num_layers, loss_function, optimizer, weights_path, get_wandb,
                 teacher_forcing, validation_split, num_gpus, verbose=False)
-
+    
     timef = time.time() - time0
     print('Time taken:', timef)
 
