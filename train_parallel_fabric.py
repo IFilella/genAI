@@ -1,8 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from transformers import AutoTokenizer
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, TensorDataset, Dataset, random_split
 from decoder_simple_fabric import MultiLayerTransformerDecoder
 from tokenizer import Tokenizer
 import pandas as pd
@@ -13,6 +12,27 @@ import wandb
 import os
 import yaml
 from torchinfo import summary
+
+class ProtMolDataset(Dataset):
+    def __init__(self, prot_seqs, smiles):
+        self.prot_seqs = prot_seqs
+        self.smiles = smiles
+    def __len__(self):
+        return len(self.prot_seqs)
+    def __getitem__(self, idx):
+        prot_seq = self.prot_seqs[idx]
+        smile = self.smiles[idx]
+        return prot_seq, smile
+    
+def collate_fn(batch, tokenizer):
+    # Tokenize the protein sequences and SMILES strings
+    prot_seqs = [prot_seq for prot_seq, _ in batch]
+    smiles = [smile for _, smile in batch]
+    prot_max_len = max(len(prot_seq) for prot_seq in prot_seqs)
+    mol_max_len = max(len(smile) for smile in smiles)
+    encoded_texts = tokenizer(prot_seqs, smiles, prot_max_length=prot_max_len, mol_max_length=mol_max_len)
+    
+    return {'input_ids': encoded_texts['input_ids'], 'attention_mask': encoded_texts['attention_mask']}
 
 # TRAINING FUNCTION
 def train_model(prot_seqs,
@@ -71,38 +91,41 @@ def train_model(prot_seqs,
 
     torch.cuda.memory._record_memory_history(max_entries=100000)
     
-    # prepare the dataset (distributed)
+    # Load the Dataset
     print('[Rank %d] Preparing the dataset...'%rank)
-
-    # Here I create the vocab file beacuse I need to have the same vocab length for all the processes
-    if fabric.global_rank == 0:
-        tokenizer = Tokenizer()
-        tokenizer.build_combined_vocab(prot_seqs, smiles)
-        tokenizer.save_combined_vocab('combined_vocab.json')
-    fabric.barrier()
-
-    # With the previously vocab file, I can load the vocab and create the input tensor
-    tokenizer = Tokenizer()
-    tokenizer.load_combined_vocab('combined_vocab.json')
-    input_tensor, vocab_size = tokenizer(prot_seqs, smiles, use_loaded_vocab=True)
-
+    dataset = ProtMolDataset(prot_seqs, smiles)
+    
     # Split the dataset into training and validation sets
     print('[Rank %d] Splitting the dataset...'%rank)
-    dataset = TensorDataset(input_tensor)
     val_size = int(validation_split * len(dataset))
     train_size = len(dataset) - val_size
-    train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
+    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+    if verbose:
+        print(f"[Rank {rank}] Train dataset size: {len(train_dataset)}, Validation dataset size: {len(val_dataset)}")
 
-    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False)
-    val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    # Load the DataLoaders and Initialize the tokenizers
+    print('[Rank %d] Initializing the tokenizers...'%rank)
+    tokenizer = Tokenizer()
+    vocab_size = tokenizer.vocab_size
+    
+    print('[Rank %d] Initializing the dataloaders...'%rank)
+    train_dataloader = DataLoader(train_dataset,
+                                  batch_size=batch_size,
+                                  shuffle=False,
+                                  collate_fn=lambda x: collate_fn(x, tokenizer))
 
+    val_dataloader = DataLoader(val_dataset,
+                                batch_size=batch_size,
+                                shuffle=False,
+                                collate_fn=lambda x: collate_fn(x, tokenizer))
+    
     # Model
     print('[Rank %d] Initializing the model...'%rank)
     model = MultiLayerTransformerDecoder(vocab_size, d_model, num_heads, ff_hidden_layer, dropout, num_layers, device=rank)
 
     assert model.linear.out_features == vocab_size, f"Expected output layer size {combined_vocab_size}, but got {model.linear.out_features}"
 
-    # Print model information (the 1000 is not the real input size, it is just a placeholder)
+    # Print model information
     if verbose:
         summary(model)
 
@@ -137,13 +160,16 @@ def train_model(prot_seqs,
         total_train_correct = 0
         total_train_samples = 0
 
-        for batch in train_dataloader:
-            input_tensor = batch[0]
+        for i, batch in enumerate(train_dataloader):
+            
+            input_tensor = batch['input_ids']
+            input_att_mask = batch['attention_mask']
 
             # Generate the shifted input tensor for teacher forcing
-            # Apply teacher forcing only ofter the delimiter token
+            # Apply teacher forcing only after the delimiter token
             batch_size = input_tensor.size(0)
             input_tensor_shifted = input_tensor.clone()
+            input_att_mask_shifted = input_att_mask.clone()
             
             if teacher_forcing:
                 for i in range(batch_size):
@@ -152,12 +178,17 @@ def train_model(prot_seqs,
                         start_idx = delim_idx[0].item() + 1
                         if start_idx < input_tensor.size(1):
                             input_tensor_shifted[i, start_idx:] = torch.cat([torch.zeros_like(input_tensor[i, start_idx:start_idx+1]), input_tensor[i, start_idx:-1]], dim=0)
+                            input_att_mask_shifted[i, start_idx:] = torch.cat([torch.zeros_like(input_att_mask[i, start_idx:start_idx+1]), input_att_mask[i, start_idx:-1]], dim=0)
                 input_tensor = input_tensor_shifted
-            
+                input_att_mask = input_att_mask_shifted
             else:
                 input_tensor = input_tensor
+                input_att_mask = input_att_mask
 
             input_tensor = input_tensor.detach()
+            input_tensor = fabric.to_device(input_tensor)
+            input_att_mask = fabric.to_device(input_att_mask)
+            
             logits = model(input_tensor, tokenizer.combined_vocab['<DELIM>'])
 
             # calculate the loss just for the second part (after the delimiter)
@@ -199,7 +230,9 @@ def train_model(prot_seqs,
 
         with torch.no_grad():
             for batch in val_dataloader:
-                input_tensor = batch[0]
+                input_tensor = batch['input_ids']
+                input_att_mask = batch['attention_mask']
+                
                 input_tensor = input_tensor.clone().detach()
                 logits = model(input_tensor, tokenizer.combined_vocab['<DELIM>'])
 

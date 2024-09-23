@@ -95,13 +95,10 @@ class Tokenizer:
             
         self.delim = delim
         
-        self.combined_vocab = None
-        self.token2id = None
-        self.id2token = None
-        
         self.special_tokens = [self.prot_tokenizer.pad_token, self.prot_tokenizer.cls_token, self.prot_tokenizer.sep_token, self.prot_tokenizer.mask_token,\
                                 self.mol_tokenizer.pad_token, self.mol_tokenizer.bos_token, self.mol_tokenizer.eos_token, self.mol_tokenizer.unk_token]
-    
+        self.build_combined_vocab()
+        
     def build_combined_vocab(self):
         # Build separate vocabularies for proteins and molecules
         self.prot_vocab = self.prot_tokenizer.get_vocab()
@@ -127,7 +124,6 @@ class Tokenizer:
         self.id2token = {v: k for k, v in self.combined_vocab.items()}
         
     def __call__(self, prots, mols, prot_max_length=540, mol_max_length=50):
-        self.build_combined_vocab()
         
         # Tokenize separately for protein, delimiter, and molecular sequences
         tokenized_prots = self.prot_tokenizer(prots, padding='max_length', truncation=True, max_length=prot_max_length, return_tensors='pt')
@@ -139,12 +135,14 @@ class Tokenizer:
             max_len = mol_max_length
             tokenized_mols = {'input_ids': [], 'attention_mask': []}
             input_ids = []
+            
             for mol in mols:
-                mol_ids = [self.mol_tokenizer.token2id.get(char, self.mol_tokenizer.unk_token_id) for char in mol]
+                mol_ids = [self.token2id.get(char, self.mol_tokenizer.unk_token_id) for char in mol]
                 if len(mol_ids) > max_len - 2:
                     mol_ids = mol_ids[:max_len - 2]
                 mol_ids = [self.mol_tokenizer.bos_token_id] + mol_ids + [self.mol_tokenizer.eos_token_id]
                 mol_ids += [self.mol_tokenizer.pad_token_id] * (max_len - len(mol_ids))
+
                 input_ids.append(mol_ids)
             tokenized_mols['input_ids'] = torch.tensor(input_ids)
             tokenized_mols['attention_mask'] = torch.tensor([[1 if token != self.mol_tokenizer.pad_token_id else 0 for token in tokens] for tokens in input_ids])
@@ -155,8 +153,7 @@ class Tokenizer:
         input_tensor = torch.cat((tokenized_prots['input_ids'], tokenized_delim, tokenized_mols['input_ids']), dim=1)
         attention_mask = torch.cat((tokenized_prots['attention_mask'], torch.ones_like(tokenized_delim), tokenized_mols['attention_mask']), dim=1)
 
-        output = {'input_ids': input_tensor, 'attention_mask': attention_mask, 'vocab_size': self.vocab_size}
-        return output
+        return {'input_ids': input_tensor, 'attention_mask': attention_mask}
     
     def decode(self, token_ids, skip_special_tokens=True):
         decoded_tokens = []
@@ -202,12 +199,13 @@ if __name__ == '__main__':
     
     tokenizer = Tokenizer(prot_tokenizer_name='facebook/esm2_t33_650M_UR50D', mol_tokenizer_name='inhouse')
     encoded_texts = tokenizer(prot_list, molecule_list, prot_max_length=100, mol_max_length=40)
-    input_tensor, attention_mask, vocab_size = encoded_texts['input_ids'], encoded_texts['attention_mask'], encoded_texts['vocab_size']
+    input_tensor, attention_mask = encoded_texts['input_ids'], encoded_texts['attention_mask']
 
+    print(prot_list[0], molecule_list[0])
     print(input_tensor[0])
     print(attention_mask[0])
-    print(vocab_size)
     print(tokenizer.combined_vocab)
+    print(tokenizer.vocab_size)
 
     
     test_to_decode = [ 0, 20, 11,  9, 19, 15,  4,  7,  7,  7,  6,  5,  6,  6,  7,  6, 15,  8,
@@ -215,8 +213,8 @@ if __name__ == '__main__':
                         12,  9, 13,  8, 19, 10, 15, 16,  7,  7, 12, 13,  6,  9, 11,  7, 14, 20,
                         7,  4,  7,  6, 17,  2,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,
                         1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,
-                        1,  1,  1,  1,  1,  1,  1,  1,  1,  1, 33,  0,  4,  4, 40, 36,  6, 41,
-                        6,  4, 25, 36,  4,  4, 36,  4,  4, 36,  4, 25,  2,  1,  1,  1,  1,  1,
+                        1,  1,  1,  1,  1,  1,  1,  1,  1,  1, 33,  0, 23, 23, 60, 56, 28, 61,
+                        28, 23, 45, 56, 23, 23, 56, 23, 23, 56, 23, 45,  2,  1,  1,  1,  1,  1,
                         1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1]
     
     decoded_text = tokenizer.decode(test_to_decode, skip_special_tokens=True)
