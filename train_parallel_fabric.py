@@ -121,7 +121,7 @@ def train_model(prot_seqs,
     
     # Model
     print('[Rank %d] Initializing the model...'%rank)
-    model = MultiLayerTransformerDecoder(vocab_size, d_model, num_heads, ff_hidden_layer, dropout, num_layers, device=rank)
+    model = MultiLayerTransformerDecoder(vocab_size, d_model, num_heads, ff_hidden_layer, dropout, num_layers)
 
     assert model.linear.out_features == vocab_size, f"Expected output layer size {combined_vocab_size}, but got {model.linear.out_features}"
 
@@ -185,7 +185,6 @@ def train_model(prot_seqs,
                 input_tensor = input_tensor
                 input_att_mask = input_att_mask
 
-            input_tensor = input_tensor.detach()
             input_tensor = fabric.to_device(input_tensor)
             input_att_mask = fabric.to_device(input_att_mask)
             
@@ -233,7 +232,9 @@ def train_model(prot_seqs,
                 input_tensor = batch['input_ids']
                 input_att_mask = batch['attention_mask']
                 
-                input_tensor = input_tensor.clone().detach()
+                input_tensor = fabric.to_device(input_tensor)
+                input_att_mask = fabric.to_device(input_att_mask)
+                
                 logits = model(input_tensor, input_att_mask, tokenizer.combined_vocab['<DELIM>'])
 
                 # Mask after the delimiter

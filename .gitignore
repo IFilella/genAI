@@ -6,3 +6,4 @@ wandb/
 *.png
 *.json
 *.gv
+memory_snapshot.pickle

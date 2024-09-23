@@ -18,7 +18,7 @@ rank = fabric.global_rank
 
 # Decoder Block
 class DecoderBlock(nn.Module):
-    def __init__(self, d_model, num_heads, ff_hidden_layer, dropout, device):
+    def __init__(self, d_model, num_heads, ff_hidden_layer, dropout):
         super(DecoderBlock, self).__init__()
 
         self.self_attention = nn.MultiheadAttention(d_model, num_heads, dropout=dropout, batch_first=True)
@@ -28,14 +28,15 @@ class DecoderBlock(nn.Module):
         self.linear2 = nn.Linear(ff_hidden_layer, d_model)
         self.norm2 = nn.LayerNorm(d_model)
         self.dropout2 = nn.Dropout(dropout)
-        self.device = device
 
-    def forward(self, x,target_mask):
-        target_mask = fabric.to_device(target_mask)
+    def forward(self, x, padding_mask, target_mask):
         x = fabric.to_device(x)
-        # x = x.permute(1, 0, 2)
-        # print('Target mask shape:', target_mask.shape)
-        attn_output, _ = self.self_attention(x, x, x, attn_mask=target_mask)
+        target_mask = fabric.to_device(target_mask)
+        padding_mask = fabric.to_device(padding_mask)
+        padding_mask = padding_mask.to(dtype=torch.float32)
+        target_mask = target_mask.to(dtype=torch.float32)
+        
+        attn_output, _ = self.self_attention(x, x, x, key_padding_mask=padding_mask, attn_mask=target_mask)
         x = x + self.dropout1(attn_output)
         x = self.norm1(x)
         ff_output = self.linear2(F.relu(self.linear1(x)))
@@ -45,7 +46,7 @@ class DecoderBlock(nn.Module):
 
 # Positional Encoding
 class PositionalEncoding(nn.Module):
-    def __init__(self, d_model, dropout=0.1, max_len=5000, device=0):
+    def __init__(self, d_model, dropout=0.1, max_len=5000):
         super(PositionalEncoding, self).__init__()
         self.dropout = nn.Dropout(p=dropout)
 
@@ -56,7 +57,6 @@ class PositionalEncoding(nn.Module):
         pe[:, 1::2] = torch.cos(position * div_term)
         pe = pe.unsqueeze(0).transpose(0, 1)
         self.pe = pe
-        self.device=device
         #self.register_buffer("pe", nn.Parameter(pe, requires_grad=False))
 
     def forward(self, x):
@@ -140,24 +140,24 @@ def create_prefix_decoder_mask(sequence, token_id=33):
 # Multilayer Decoder
 # This model has multiple decoder blocks stacked on top of each other
 class MultiLayerTransformerDecoder(nn.Module):
-    def __init__(self, vocab_size, d_model, num_heads, ff_hidden_layer, dropout, num_layers, device):
+    def __init__(self, vocab_size, d_model, num_heads, ff_hidden_layer, dropout, num_layers):
         super(MultiLayerTransformerDecoder, self).__init__()
 
         self.embedding = nn.Embedding(vocab_size, d_model)
-        self.pos_encoder = PositionalEncoding(d_model, dropout, device=device)
+        self.pos_encoder = PositionalEncoding(d_model, dropout)
         self.transformer_blocks = nn.ModuleList([
-            DecoderBlock(d_model, num_heads, ff_hidden_layer, dropout, device)
+            DecoderBlock(d_model, num_heads, ff_hidden_layer, dropout)
             for _ in range(num_layers)
         ])
         self.linear = nn.Linear(d_model, vocab_size)
         self.softmax = nn.LogSoftmax(dim=-1)
-        self.device = device
 
-    def forward(self, x, delim_tokenidx):
+    def forward(self, x, padding_mask, delim_tokenidx):
         x = x.long().clone()
         x = fabric.to_device(x)
+        padding_mask = fabric.to_device(padding_mask)
 
-        mask = create_prefix_decoder_mask(x, delim_tokenidx)
+        target_mask = create_prefix_decoder_mask(x, delim_tokenidx)
 
         x = self.embedding(x)
         x = self.pos_encoder(x)
@@ -165,8 +165,8 @@ class MultiLayerTransformerDecoder(nn.Module):
         for transformer_block in self.transformer_blocks:
             # Generate a mask to prevent attention to future positions
             # We mask just the molecules (the second half of the input)
-            target_mask = fabric.to_device(mask)
-            x = transformer_block(x,target_mask)
+            target_mask = fabric.to_device(target_mask)
+            x = transformer_block(x, padding_mask, target_mask)
 
         output = self.linear(x)
         output = self.softmax(output)
