@@ -189,7 +189,7 @@ def train_model(prot_seqs,
             input_tensor = fabric.to_device(input_tensor)
             input_att_mask = fabric.to_device(input_att_mask)
             
-            logits = model(input_tensor, tokenizer.combined_vocab['<DELIM>'])
+            logits = model(input_tensor, input_att_mask, tokenizer.combined_vocab['<DELIM>'])
 
             # calculate the loss just for the second part (after the delimiter)
             # mask after the delimiter
@@ -234,7 +234,7 @@ def train_model(prot_seqs,
                 input_att_mask = batch['attention_mask']
                 
                 input_tensor = input_tensor.clone().detach()
-                logits = model(input_tensor, tokenizer.combined_vocab['<DELIM>'])
+                logits = model(input_tensor, input_att_mask, tokenizer.combined_vocab['<DELIM>'])
 
                 # Mask after the delimiter
                 batch_size = input_tensor.size(0)
