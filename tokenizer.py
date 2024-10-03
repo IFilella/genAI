@@ -4,8 +4,8 @@ from itertools import chain
 from transformers import AutoTokenizer
 import json
 
-prot_vocab = "ACDEFGHIKLMNPQRSTVWY"
-mol_vocab = "CNOHPSFIKLBcnohpsfikl1234567890#=@[]()/\\-+"
+#prot_vocab = "ACDEFGHIKLMNPQRSTVWY"
+#mol_vocab = "CNOHPSFIKLBcnohpsfikl1234567890#=@[]()/\\-+"
 
 # TO DO: WHAT TO DO WITH THE SPECIAL CHARACTERS?? --> DECIDE WHAT TO DO WITH THEM
 left_characters = "Zr.eaVAugTRtWMdb<>*%:"
@@ -46,22 +46,35 @@ class MolecularTokenizer:
         self.eos_token_id = self.token2id[self.eos_token]
         self.unk_token_id = self.token2id[self.unk_token]
 
-    def __call__(self, molecule_list, truncation=True, padding='max_length', max_length=100, return_tensors="pt"):
+    def __call__(self, molecule_list, truncation=True, padding=True, max_length=80, return_tensors="pt"):
 
         all_input_ids = []
         all_attention_masks = []
 
-        for text in molecule_list:
-            tokens = [x for x in text]
+        if isinstance(molecule_list, str):
+            molecule_list = [molecule_list]
+        elif isinstance(molecule_list, list):
+            pass
+        else:
+            raise TypeError('molecule_list must be either a single molecule \
+                            or a list of molecules')
+
+        longest = min(int(max(len(m) for m in molecule_list)), max_length)
+        
+        for molecule in molecule_list:
+            tokens = [x for x in molecule]
                 
             if truncation and len(tokens) > max_length - 2: # -2 to make space for cls and eos tokens
                 tokens = tokens[:max_length - 2]
             
             tokens = [self.cls_token] + tokens + [self.eos_token]
-            
-            if padding == 'max_length' and len(tokens) < max_length:
-                tokens += [self.pad_token] * (max_length - len(tokens))
-            
+
+            if padding and len(tokens) < longest - 2:
+                if max_length > longest:
+                    tokens += [self.pad_token] * (longest - len(tokens) + 2)
+                else:
+                    tokens += [self.pad_token] * (longest - len(tokens))
+
             input_ids = [self.token2id.get(token, self.unk_token_id) for token in tokens]
             attention_mask = [0 if token != self.pad_token else 1 for token in tokens]
 
@@ -170,12 +183,12 @@ if __name__ == '__main__':
     prot_list = [x.split('$')[0] for x in texts]
     molecule_list = [x.split('$')[-1] for x in texts]
     # print(prot_list)
-    # print(molecule_list)
+    # print(molecule_list, len(molecule_list))
     
     # Example usage of molecular tokenizer
     """
     molecular_tokenizer = MolecularTokenizer()
-    encoded_molecule = molecular_tokenizer(molecule_list, truncation=True, padding='max_length', max_length=50, return_tensors="pt")
+    encoded_molecule = molecular_tokenizer(molecule_list, truncation=True, padding=True, max_length=80, return_tensors="pt")
     print(molecular_tokenizer.vocab)
     print(encoded_molecule['input_ids'])
     print(encoded_molecule['input_ids'][0])
@@ -183,7 +196,7 @@ if __name__ == '__main__':
     print(molecular_tokenizer.id2token)
     print(molecular_tokenizer.decode([2,  4,  4, 40, 36,  6, 41,  6,  4, 25, 36,  4,  4, 36,  4,  4, 36,  4, 25,  3,  0,  0,  0,  0,  0]))
     """
-
+   
     # Example usage of protein tokenizer
     """
     prot_tokenizer = AutoTokenizer.from_pretrained('facebook/esm2_t33_650M_UR50D')
