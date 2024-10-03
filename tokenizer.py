@@ -23,11 +23,11 @@ left_characters = "Zr.eaVAugTRtWMdb<>*%:"
 
 class MolecularTokenizer:
     def __init__(self):
-        self.bos_token = '<bos>'
+        self.cls_token = '<cls>'
         self.pad_token = '<pad>'
         self.eos_token = '<eos>'
         self.unk_token = '<unk>'
-        self.special_tokens = [self.bos_token, self.pad_token, self.eos_token, self.unk_token]
+        self.special_tokens = [self.cls_token, self.pad_token, self.eos_token, self.unk_token]
         self.build_vocab()
         
     def build_vocab(self):
@@ -41,7 +41,7 @@ class MolecularTokenizer:
         self.id2token = {idx: token for idx, token in enumerate(self.vocab)}
 
         # Ensure that special tokens are correctly mapped
-        self.bos_token_id = self.token2id[self.bos_token]
+        self.cls_token_id = self.token2id[self.cls_token]
         self.pad_token_id = self.token2id[self.pad_token]
         self.eos_token_id = self.token2id[self.eos_token]
         self.unk_token_id = self.token2id[self.unk_token]
@@ -54,16 +54,16 @@ class MolecularTokenizer:
         for text in molecule_list:
             tokens = [x for x in text]
                 
-            if truncation and len(tokens) > max_length - 2: # -2 to make space for bos and eos tokens
+            if truncation and len(tokens) > max_length - 2: # -2 to make space for cls and eos tokens
                 tokens = tokens[:max_length - 2]
             
-            tokens = [self.bos_token] + tokens + [self.eos_token]
+            tokens = [self.cls_token] + tokens + [self.eos_token]
             
             if padding == 'max_length' and len(tokens) < max_length:
                 tokens += [self.pad_token] * (max_length - len(tokens))
             
             input_ids = [self.token2id.get(token, self.unk_token_id) for token in tokens]
-            attention_mask = [1 if token != self.pad_token else 0 for token in tokens]
+            attention_mask = [0 if token != self.pad_token else 1 for token in tokens]
 
             all_input_ids.append(input_ids)
             all_attention_masks.append(attention_mask)
@@ -83,8 +83,9 @@ class MolecularTokenizer:
         return ''.join(tokens)
 
 class Tokenizer:
-    def __init__(self, prot_tokenizer_name='facebook/esm2_t33_650M_UR50D', mol_tokenizer_name='inhouse', delim='<DELIM>'):
-
+    def __init__(self, prot_tokenizer_name='facebook/esm2_t33_650M_UR50D', mol_tokenizer_name='inhouse'):
+        self.delim_token = '<DELIM>'
+        
         self.prot_tokenizer = AutoTokenizer.from_pretrained(prot_tokenizer_name)
         
         self.mol_tokenizer_name = mol_tokenizer_name
@@ -93,10 +94,8 @@ class Tokenizer:
         else:
             self.mol_tokenizer = AutoTokenizer.from_pretrained(mol_tokenizer_name, trust_remote_code=True)
             
-        self.delim = delim
-        
         self.special_tokens = [self.prot_tokenizer.pad_token, self.prot_tokenizer.cls_token, self.prot_tokenizer.sep_token, self.prot_tokenizer.mask_token,\
-                                self.mol_tokenizer.pad_token, self.mol_tokenizer.bos_token, self.mol_tokenizer.eos_token, self.mol_tokenizer.unk_token]
+                                self.mol_tokenizer.pad_token, self.mol_tokenizer.cls_token, self.mol_tokenizer.eos_token, self.mol_tokenizer.unk_token]
         self.build_combined_vocab()
         
     def build_combined_vocab(self):
@@ -104,14 +103,13 @@ class Tokenizer:
         self.prot_vocab = self.prot_tokenizer.get_vocab()
 
         if self.mol_tokenizer_name == 'inhouse':
-            self.mol_tokenizer.build_vocab()
             self.mol_vocab = self.mol_tokenizer.token2id
         else:
             self.mol_vocab = self.mol_tokenizer.get_vocab()
 
         # Combine them in a shared dictionary with unique keys
         self.combined_vocab = dict(self.prot_vocab.items())
-        self.combined_vocab[self.delim] = max(self.prot_vocab.values()) + 1 # Add delimiter token
+        self.combined_vocab[self.delim_token] = max(self.prot_vocab.values()) + 1 # Add delimiter token
         current_index = max(self.prot_vocab.values()) + 2 # Add molecular tokens starting from the next index
         for token, idx in self.mol_vocab.items():
             if token not in self.combined_vocab:
@@ -140,16 +138,16 @@ class Tokenizer:
                 mol_ids = [self.token2id.get(char, self.mol_tokenizer.unk_token_id) for char in mol]
                 if len(mol_ids) > max_len - 2:
                     mol_ids = mol_ids[:max_len - 2]
-                mol_ids = [self.mol_tokenizer.bos_token_id] + mol_ids + [self.mol_tokenizer.eos_token_id]
+                mol_ids = [self.mol_tokenizer.cls_token_id] + mol_ids + [self.mol_tokenizer.eos_token_id]
                 mol_ids += [self.mol_tokenizer.pad_token_id] * (max_len - len(mol_ids))
 
                 input_ids.append(mol_ids)
             tokenized_mols['input_ids'] = torch.tensor(input_ids)
-            tokenized_mols['attention_mask'] = torch.tensor([[1 if token != self.mol_tokenizer.pad_token_id else 0 for token in tokens] for tokens in input_ids])
+            tokenized_mols['attention_mask'] = torch.tensor([[0 if token != self.mol_tokenizer.pad_token_id else 1 for token in tokens] for tokens in input_ids])
         else:
             tokenized_mols = self.mol_tokenizer(mols, padding='max_length', max_length=mol_max_length, return_tensors='pt')
 
-        tokenized_delim = (torch.tensor([self.token2id[self.delim]] * len(prots))).unsqueeze(1)
+        tokenized_delim = (torch.tensor([self.token2id[self.delim_token]] * len(prots))).unsqueeze(1)
         input_tensor = torch.cat((tokenized_prots['input_ids'], tokenized_delim, tokenized_mols['input_ids']), dim=1)
         attention_mask = torch.cat((tokenized_prots['attention_mask'], torch.ones_like(tokenized_delim), tokenized_mols['attention_mask']), dim=1)
 
