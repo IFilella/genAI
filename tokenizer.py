@@ -95,6 +95,80 @@ class MolecularTokenizer:
             tokens = [token for token in tokens]
         return ''.join(tokens)
 
+class ProteinTokenizer():
+    def __init__(self):
+        self.cls_token = '<cls>'
+        self.pad_token = '<pad>'
+        self.eos_token = '<eos>'
+        self.unk_token = '<unk>'
+        self.special_tokens = [self.cls_token, self.pad_token, self.eos_token, self.unk_token]
+        self.build_vocab()
+
+    def build_vocab(self):
+        # Fixed vocabulary for proteins
+        prot_vocab = "ACDEFGHIKLMNPQRSTVWY"
+        self.vocab = self.special_tokens + list(prot_vocab)
+        self.vocab_size = len(self.vocab)
+
+        # Create token2id and id2token mappings
+        self.token2id = {token: idx for idx, token in enumerate(self.vocab)}
+        self.id2token = {idx: token for idx, token in enumerate(self.vocab)}
+
+        # Ensure that special tokens are correctly mapped
+        self.cls_token_id = self.token2id[self.cls_token]
+        self.pad_token_id = self.token2id[self.pad_token]
+        self.eos_token_id = self.token2id[self.eos_token]
+        self.unk_token_id = self.token2id[self.unk_token]
+
+    def __call__(self, protein_list, truncation=True, padding=True, max_length=600, return_tensors="pt"):
+
+        all_input_ids = []
+        all_attention_masks = []
+
+        if isinstance(protein_list, str):
+            protein_list = [protein_list]
+        elif isinstance(protein_list, list):
+            pass
+        else:
+            raise TypeError('protein_list must be either a single protein \
+                            or a list of proteins')
+
+        longest = min(int(max(len(m) for m in protein_list)), max_length)
+
+        for protein in protein_list:
+            tokens = [x for x in protein]
+
+            if truncation and len(tokens) > max_length - 2: # -2 to make space for cls    and eos tokens
+                tokens = tokens[:max_length - 2]
+
+            tokens = [self.cls_token] + tokens + [self.eos_token]
+
+            if padding and len(tokens) < longest - 2:
+                if max_length > longest:
+                    tokens += [self.pad_token] * (longest - len(tokens) + 2)
+                else:
+                    tokens += [self.pad_token] * (longest - len(tokens))
+
+            input_ids = [self.token2id.get(token, self.unk_token_id) for token in tokens]
+            attention_mask = [0 if token != self.pad_token else 1 for token in tokens]
+
+            all_input_ids.append(input_ids)
+            all_attention_masks.append(attention_mask)
+
+        input_ids_tensor = torch.tensor(all_input_ids)
+        attention_masks_tensor = torch.tensor(all_attention_masks)
+
+        return {'input_ids': input_ids_tensor, 'attention_mask': attention_masks_tensor}
+        
+    def decode(self, token_ids, skip_special_tokens=False):
+
+        tokens = [self.id2token.get(id, self.unk_token) for id in token_ids]
+        if skip_special_tokens:
+            tokens = [token for token in tokens if token not in self.special_tokens]
+        else:
+            tokens = [token for token in tokens]
+        return ''.join(tokens)
+
 class Tokenizer:
     def __init__(self, prot_tokenizer_name='facebook/esm2_t33_650M_UR50D', mol_tokenizer_name='inhouse'):
         self.delim_token = '<DELIM>'
