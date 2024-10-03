@@ -69,7 +69,7 @@ class MolecularTokenizer:
             
             tokens = [self.cls_token] + tokens + [self.eos_token]
 
-            if padding and len(tokens) < longest - 2:
+            if padding and len(tokens) - 2 < longest:
                 if max_length > longest:
                     tokens += [self.pad_token] * (longest - len(tokens) + 2)
                 else:
@@ -143,7 +143,7 @@ class ProteinTokenizer():
 
             tokens = [self.cls_token] + tokens + [self.eos_token]
 
-            if padding and len(tokens) < longest - 2:
+            if padding and len(tokens) - 2 < longest:
                 if max_length > longest:
                     tokens += [self.pad_token] * (longest - len(tokens) + 2)
                 else:
@@ -170,69 +170,50 @@ class ProteinTokenizer():
         return ''.join(tokens)
 
 class Tokenizer:
-    def __init__(self, prot_tokenizer_name='facebook/esm2_t33_650M_UR50D', mol_tokenizer_name='inhouse'):
+    def __init__(self):
         self.delim_token = '<DELIM>'
         
-        self.prot_tokenizer = AutoTokenizer.from_pretrained(prot_tokenizer_name)
-        
-        self.mol_tokenizer_name = mol_tokenizer_name
-        if self.mol_tokenizer_name == 'inhouse':
-            self.mol_tokenizer = MolecularTokenizer()
-        else:
-            self.mol_tokenizer = AutoTokenizer.from_pretrained(mol_tokenizer_name, trust_remote_code=True)
-            
-        self.special_tokens = [self.prot_tokenizer.pad_token, self.prot_tokenizer.cls_token, self.prot_tokenizer.sep_token, self.prot_tokenizer.mask_token,\
-                                self.mol_tokenizer.pad_token, self.mol_tokenizer.cls_token, self.mol_tokenizer.eos_token, self.mol_tokenizer.unk_token]
-        self.build_combined_vocab()
-        
-    def build_combined_vocab(self):
-        # Build separate vocabularies for proteins and molecules
-        self.prot_vocab = self.prot_tokenizer.get_vocab()
+        self.mol_tokenizer = MolecularTokenizer()
+        self.prot_tokenizer = ProteinTokenizer()
 
-        if self.mol_tokenizer_name == 'inhouse':
-            self.mol_vocab = self.mol_tokenizer.token2id
-        else:
-            self.mol_vocab = self.mol_tokenizer.get_vocab()
-
-        # Combine them in a shared dictionary with unique keys
-        self.combined_vocab = dict(self.prot_vocab.items())
-        self.combined_vocab[self.delim_token] = max(self.prot_vocab.values()) + 1 # Add delimiter token
-        current_index = max(self.prot_vocab.values()) + 2 # Add molecular tokens starting from the next index
-        for token, idx in self.mol_vocab.items():
-            if token not in self.combined_vocab:
-                self.combined_vocab[token] = current_index
-                current_index += 1
-        
-        # Set the mappings
-        self.vocab_size = len(self.combined_vocab)
-        self.token2id = self.combined_vocab
-        self.id2token = {v: k for k, v in self.combined_vocab.items()}
-        
-    def __call__(self, prots, mols, prot_max_length=540, mol_max_length=50):
+        #self.special_tokens = [self.mol_tokenizer.cls_token, self.mol_tokenizer.pad_token, self.mol_tokenizer.eos_token, self.mol_tokenizer.unk_token, self.delim_token]
+         
+    def __call__(self, prots, mols, prot_max_length=600, mol_max_length=80):
         
         # Tokenize separately for protein, delimiter, and molecular sequences
-        tokenized_prots = self.prot_tokenizer(prots, padding='max_length', truncation=True, max_length=prot_max_length, return_tensors='pt')
+        tokenized_mols = self. mol_tokenizer(mols, padding=True, truncation=True, max_length=mol_max_length)
+        tokenized_prots = self.prot_tokenizer(prots, padding=True, truncation=True, max_length=prot_max_length, return_tensors='pt')
+       
+        prot_vocab_size = self.prot_tokenizer.vocab_size
 
-        if self.mol_tokenizer_name == 'inhouse':
-            #tokenized_mols = self.mol_tokenizer(mols, padding='max_length', max_length=mol_max_length, return_tensors='pt')
-            
-            # Adjust molecular token ids to match the combined vocabulary
-            max_len = mol_max_length
-            tokenized_mols = {'input_ids': [], 'attention_mask': []}
-            input_ids = []
-            
-            for mol in mols:
-                mol_ids = [self.token2id.get(char, self.mol_tokenizer.unk_token_id) for char in mol]
-                if len(mol_ids) > max_len - 2:
-                    mol_ids = mol_ids[:max_len - 2]
-                mol_ids = [self.mol_tokenizer.cls_token_id] + mol_ids + [self.mol_tokenizer.eos_token_id]
-                mol_ids += [self.mol_tokenizer.pad_token_id] * (max_len - len(mol_ids))
+        # Remove eos id of prot input_ids and corresponding attention_mask
+        eos_prot_id = self.prot_tokenizer.eos_token_id
+        mask = tokenized_prots['input_ids'] != eos_prot_id
+        prot_input_ids = [seq[mask[idx]] for idx, seq in enumerate(tokenized_prots['input_ids'])]
+        prot_input_ids = torch.stack(prot_input_ids)
+        prot_attention_mask = [seq[mask[idx]] for idx, seq in enumerate(tokenized_prots['attention_mask'])]
+        prot_attention_mask = torch.stack(prot_attention_mask)
+        
+        # Remove cls of mol
+        cls_mol_id = self.mol_tokenizer.cls_token_id
+        mask = tokenized_mols['input_ids'] != cls_mol_id
+        mols_input_ids = [seq[mask[idx]] for idx, seq in enumerate(tokenized_mols['input_ids'])]
+        mols_input_ids = torch.stack(mols_input_ids)
+        mols_attention_mask = [seq[mask[idx]] for idx, seq in enumerate(tokenized_mols['attention_mask'])]
+        mols_attention_mask = torch.stack(mols_attention_mask)
+        
+        # Define delim_token_id
+        self.delim_token_id = prot_vocab_size + 1
+        self.mol_tokenizer.special_tokens
 
-                input_ids.append(mol_ids)
-            tokenized_mols['input_ids'] = torch.tensor(input_ids)
-            tokenized_mols['attention_mask'] = torch.tensor([[0 if token != self.mol_tokenizer.pad_token_id else 1 for token in tokens] for tokens in input_ids])
-        else:
-            tokenized_mols = self.mol_tokenizer(mols, padding='max_length', max_length=mol_max_length, return_tensors='pt')
+        # Redefine molecular token_ids to avoid duplicate token_ids between mol and prot
+        print(mols_input_ids)
+        for input_ids in mols_input_ids:
+            print(input_ids)
+            input_ids = [token.item() + prot_vocab_size + 2 for token in input_ids if token.item() not in self.mol_tokenizer.special_tokens]
+            print(input_ids)
+        exit()
+        print(mols_input_ids)
 
         tokenized_delim = (torch.tensor([self.token2id[self.delim_token]] * len(prots))).unsqueeze(1)
         input_tensor = torch.cat((tokenized_prots['input_ids'], tokenized_delim, tokenized_mols['input_ids']), dim=1)
@@ -256,9 +237,9 @@ if __name__ == '__main__':
     from data.fake_data import texts
     prot_list = [x.split('$')[0] for x in texts]
     molecule_list = [x.split('$')[-1] for x in texts]
-    # print(prot_list)
+    # print(prot_list, len(prot_list))
     # print(molecule_list, len(molecule_list))
-    
+   
     # Example usage of molecular tokenizer
     """
     molecular_tokenizer = MolecularTokenizer()
@@ -273,17 +254,17 @@ if __name__ == '__main__':
    
     # Example usage of protein tokenizer
     """
-    prot_tokenizer = AutoTokenizer.from_pretrained('facebook/esm2_t33_650M_UR50D')
-    encoded_prots = prot_tokenizer(prot_list, padding='max_length', truncation=True, max_length=20, return_tensors='pt')
+    prot_tokenizer = ProteinTokenizer()
+    encoded_prots = prot_tokenizer(prot_list, padding=True, truncation=True, max_length=600, return_tensors='pt')
     print(encoded_prots['input_ids'])
     print(prot_tokenizer.vocab_size)
     print(prot_tokenizer.get_vocab())
     """
-    
     # Example usage of Tokenizer
     
-    tokenizer = Tokenizer(prot_tokenizer_name='facebook/esm2_t33_650M_UR50D', mol_tokenizer_name='inhouse')
-    encoded_texts = tokenizer(prot_list, molecule_list, prot_max_length=100, mol_max_length=40)
+    tokenizer = Tokenizer()
+    encoded_texts = tokenizer(prot_list, molecule_list, prot_max_length=600, mol_max_length=80)
+    exit()
     input_tensor, attention_mask = encoded_texts['input_ids'], encoded_texts['attention_mask']
 
     print(prot_list[0], molecule_list[0])
