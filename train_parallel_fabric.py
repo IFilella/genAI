@@ -37,8 +37,6 @@ def collate_fn(batch, tokenizer):
 # TRAINING FUNCTION
 def train_model(prot_seqs,
                 smiles,
-                prot_tokenizer_name,
-                mol_tokenizer_name,
                 num_epochs=10,
                 lr=0.0001,
                 batch_size=4,
@@ -63,8 +61,6 @@ def train_model(prot_seqs,
     Args:
         prot_seqs (list): A list of protein sequences
         smiles (list): A list of SMILES strings
-        prot_tokenizer_name (str): The name of the protein tokenizer to use
-        mol_tokenizer_name (str): The name of the molecule tokenizer to use
         num_epochs (int, optional): The number of epochs to train the model. Defaults to 10.
         lr (float, optional): The learning rate. Defaults to 0.0001.
         batch_size (int, optional): The batch size. Defaults to 4.
@@ -83,7 +79,7 @@ def train_model(prot_seqs,
         verbose (bool, optional): Whether to print model information. Defaults to False.
     """
 
-    fabric = Fabric(accelerator='cuda', devices=num_gpus, num_nodes=1)
+    fabric = Fabric(accelerator='cuda', devices=num_gpus, num_nodes=1, strategy='deepspeed')
     fabric.launch()
 
     rank = fabric.global_rank
@@ -295,8 +291,6 @@ def main():
     df = df.sample(1000)
     prots = df[config['col_prots']].tolist()
     mols = df[config['col_mols']].tolist()
-    prot_tokenizer_name = config['protein_tokenizer']
-    mol_tokenizer_name = config['smiles_tokenizer']
 
     # Define the hyperparameters
     d_model        = config['d_model']
@@ -339,9 +333,9 @@ def main():
         )
 
     # Train the model
-    train_model(prots, mols, prot_tokenizer_name, mol_tokenizer_name,
-                num_epochs, learning_rate, batch_size, d_model, num_heads, ff_hidden_layer,
-                dropout, num_layers, loss_function, optimizer, weights_path, get_wandb,
+    train_model(prots, mols, num_epochs, learning_rate, batch_size,
+                d_model, num_heads, ff_hidden_layer, dropout, num_layers,
+                loss_function, optimizer, weights_path, get_wandb,
                 teacher_forcing, validation_split, num_gpus, verbose)
     
     timef = time.time() - time0

@@ -2,8 +2,6 @@
 data_path: 'data/data_ChEMBL_BindingDB_sort.csv'
 col_prots: 'Sequence'
 col_mols: 'SMILES'
-protein_tokenizer: 'facebook/esm2_t33_650M_UR50'
-smiles_tokenizer: 'inhouse'
 d_model: 1024
 num_heads: 8
 ff_hidden_layer: 4096
