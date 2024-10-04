@@ -28,9 +28,7 @@ def collate_fn(batch, tokenizer):
     # Tokenize the protein sequences and SMILES strings
     prot_seqs = [prot_seq for prot_seq, _ in batch]
     smiles = [smile for _, smile in batch]
-    prot_max_len = max(len(prot_seq) for prot_seq in prot_seqs)
-    mol_max_len = max(len(smile) for smile in smiles)
-    encoded_texts = tokenizer(prot_seqs, smiles, prot_max_length=prot_max_len, mol_max_length=mol_max_len)
+    encoded_texts = tokenizer(prot_seqs, smiles)
     
     return {'input_ids': encoded_texts['input_ids'], 'attention_mask': encoded_texts['attention_mask']}
 
@@ -79,7 +77,7 @@ def train_model(prot_seqs,
         verbose (bool, optional): Whether to print model information. Defaults to False.
     """
 
-    fabric = Fabric(accelerator='cuda', devices=num_gpus, num_nodes=1, strategy='deepspeed')
+    fabric = Fabric(accelerator='cuda', devices=num_gpus, num_nodes=1)
     fabric.launch()
 
     rank = fabric.global_rank
@@ -119,7 +117,7 @@ def train_model(prot_seqs,
     print('[Rank %d] Initializing the model...'%rank)
     model = MultiLayerTransformerDecoder(vocab_size, d_model, num_heads, ff_hidden_layer, dropout, num_layers)
 
-    assert model.linear.out_features == vocab_size, f"Expected output layer size {combined_vocab_size}, but got {model.linear.out_features}"
+    assert model.linear.out_features == vocab_size, f"Expected output layer size {vocab_size}, but got {model.linear.out_features}"
 
     # Print model information
     if verbose:
@@ -127,7 +125,7 @@ def train_model(prot_seqs,
 
     # TO DO: Add support for other loss functions and optimizers
     # Loss function
-    padding_token_id = tokenizer.combined_vocab['<pad>'] # Ensure that padding tokens are masked during training to prevent the model from learning to generate them.
+    padding_token_id = tokenizer.mol_tokenizer.token2id['<pad>'] # Ensure that padding tokens are masked during training to prevent the model from learning to generate them.
     if loss_function == 'crossentropy':
         criterion = nn.CrossEntropyLoss(ignore_index=padding_token_id)
     else:
@@ -184,14 +182,14 @@ def train_model(prot_seqs,
             input_tensor = fabric.to_device(input_tensor)
             input_att_mask = fabric.to_device(input_att_mask)
             
-            logits = model(input_tensor, input_att_mask, tokenizer.combined_vocab['<DELIM>'])
+            logits = model(input_tensor, input_att_mask, tokenizer.delim_token_id)
 
             # calculate the loss just for the second part (after the delimiter)
             # mask after the delimiter
             batch_size = input_tensor.size(0)
             loss_mask = torch.zeros_like(input_tensor, dtype=torch.bool)
             for i in range(batch_size):
-                delim_idx = (input_tensor[i] == tokenizer.combined_vocab['<DELIM>']).nonzero(as_tuple=True)
+                delim_idx = (input_tensor[i] == tokenizer.delim_token_id).nonzero(as_tuple=True)
                 if len(delim_idx[0]) > 0:
                     start_idx = delim_idx[0].item() + 1
                     loss_mask[i, start_idx:] = True
@@ -231,13 +229,13 @@ def train_model(prot_seqs,
                 input_tensor = fabric.to_device(input_tensor)
                 input_att_mask = fabric.to_device(input_att_mask)
                 
-                logits = model(input_tensor, input_att_mask, tokenizer.combined_vocab['<DELIM>'])
+                logits = model(input_tensor, input_att_mask, tokenizer.delim_token_id)
 
                 # Mask after the delimiter
                 batch_size = input_tensor.size(0)
                 loss_mask = torch.zeros_like(input_tensor, dtype=torch.bool)
                 for i in range(batch_size):
-                    delim_idx = (input_tensor[i] == tokenizer.combined_vocab['<DELIM>']).nonzero(as_tuple=True)
+                    delim_idx = (input_tensor[i] == tokenizer.delim_token_id).nonzero(as_tuple=True)
                     if len(delim_idx[0]) > 0:
                         start_idx = delim_idx[0].item() + 1
                         loss_mask[i, start_idx:] = True
