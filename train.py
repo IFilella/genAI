@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset, Dataset, random_split
 from decoder_model import MultiLayerTransformerDecoder
+from dataset import ProtMolDataset, collate_fn
 from tokenizer import Tokenizer
 import pandas as pd
 from lightning.fabric import Fabric
@@ -13,24 +14,6 @@ import os
 import yaml
 from torchinfo import summary
 
-class ProtMolDataset(Dataset):
-    def __init__(self, prot_seqs, smiles):
-        self.prot_seqs = prot_seqs
-        self.smiles = smiles
-    def __len__(self):
-        return len(self.prot_seqs)
-    def __getitem__(self, idx):
-        prot_seq = self.prot_seqs[idx]
-        smile = self.smiles[idx]
-        return prot_seq, smile
-    
-def collate_fn(batch, tokenizer):
-    # Tokenize the protein sequences and SMILES strings
-    prot_seqs = [prot_seq for prot_seq, _ in batch]
-    smiles = [smile for _, smile in batch]
-    encoded_texts = tokenizer(prot_seqs, smiles)
-    
-    return {'input_ids': encoded_texts['input_ids'], 'attention_mask': encoded_texts['attention_mask']}
 
 # TRAINING FUNCTION
 def train_model(prot_seqs,
@@ -275,68 +258,91 @@ def train_model(prot_seqs,
         torch.cuda.memory._dump_snapshot('memory_snapshot.pickle')
     torch.cuda.memory._record_memory_history(enabled=None)
 
+def parse_args():
+    """Parse the command-line arguments."""
+    
+    parser = argparse.ArgumentParser(description='Train a Transformer Decoder model')
+    parser.add_argument('--config', type=str, default='config.yaml', help='Path to the configuration YAML file with all the parameters', required=True)
+    return parser.parse_args()
+
+def load_config(config_path):
+    """Loads the configuration file and returns a dictionary of the parameters."""
+    
+    with open(config_path, 'r') as file:
+        config = yaml.safe_load(file)
+        
+    # Load configuration variables
+    config_dict = {
+        'data_path': config['data_path'],
+        'col_prots': config['col_prots'],
+        'col_mols': config['col_mols'],
+        'd_model': config['d_model'],
+        'num_heads': config['num_heads'],
+        'ff_hidden_layer': config['ff_hidden_layer'],
+        'dropout': config['dropout'],
+        'num_layers': config['num_layers'],
+        'batch_size': config['batch_size'],
+        'num_epochs': config['num_epochs'],
+        'learning_rate': config['learning_rate'],
+        'loss_function': config['loss_function'],
+        'optimizer': config['optimizer'],
+        'weights_path': config['weights_path'],
+        'teacher_forcing': config['teacher_forcing'],
+        'validation_split': config['validation_split'],
+        'get_wandb': config['get_wandb'],
+        'num_gpus': config['num_gpus'],
+        'verbose': config['verbose'],
+        'wandb_project': config['wandb_project']
+    }
+    
+    # Add configuration for wandb if enabled
+    if config['get_wandb']:
+        config_dict['wandb'] = {
+            'project': config['wandb_project'],
+            'wandb_config': {
+                "learning_rate": config['learning_rate'],
+                "batch_size": config['batch_size'],
+                "num_epochs": config['num_epochs'],
+                "d_model": config['d_model'],
+                "num_heads": config['num_heads'],
+                "ff_hidden_layer": config['ff_hidden_layer'],
+                "dropout": config['dropout'],
+                "num_layers": config['num_layers'],
+                "architecture": "Decoder-only",
+                "dataset": "ChEMBL_BindingDB_sorted_sample10000",
+            }
+        }
+    
+    return config_dict
+
 def main():
 
     time0 = time.time()
 
-    parser = argparse.ArgumentParser(description='Train a Transformer Decoder model')
-    parser.add_argument('--config', type=str, default='config.yaml', help='Path to the configuration YAML file with all the parameters', required=True)
-    args = parser.parse_args()
+    args = parse_args()
 
-    with open(args.config, 'r') as file:
-        config = yaml.safe_load(file)
+    config = load_config(args.config)
 
-    # Get the data (in this case, it is sampled)
+    # Get the data (in this case, it is sampled for testing purposes)
     df = pd.read_csv(config['data_path'])
     df = df.sample(1000)
     prots = df[config['col_prots']].tolist()
     mols = df[config['col_mols']].tolist()
 
-    # Define the hyperparameters
-    d_model        = config['d_model']
-    num_heads      = config['num_heads']
-    ff_hidden_layer  = config['ff_hidden_layer']
-    dropout        = config['dropout']
-    num_layers     = config['num_layers']
-    batch_size     = config['batch_size']
-    num_epochs     = config['num_epochs']
-    learning_rate  = config['learning_rate']
-    loss_function  = config['loss_function']
-    optimizer      = config['optimizer']
-    weights_path   = config['weights_path']
-    teacher_forcing = config['teacher_forcing']
-    validation_split = config['validation_split']
-    get_wandb      = config['get_wandb']
-    num_gpus       = config['num_gpus']
-    verbose        = config['verbose']
-
-    # Configure wandb
-    if get_wandb:
-        # start a new wandb run to track this script
+    # Configure wandb if enabled to track the training process
+    if config['get_wandb']:
         wandb.init(
-            # set the wandb project where this run will be logged
-            project=config['wandb_project'],
-
-            # track hyperparameters and run metadata
-            config={
-            "learning_rate": learning_rate,
-            "batch_size": batch_size,
-            "num_epochs": num_epochs,
-            "d_model": d_model,
-            "num_heads": num_heads,
-            "ff_hidden_layer": ff_hidden_layer,
-            "dropout": dropout,
-            "num_layers": num_layers,
-            "architecture": "Decoder-only",
-            "dataset": "ChEMBL_BindingDB_sorted_sample10000",
-            }
+            project=config['wandb']['wandb_project'],
+            config=config['wandb']['wandb_config']
         )
 
     # Train the model
-    train_model(prots, mols, num_epochs, learning_rate, batch_size,
-                d_model, num_heads, ff_hidden_layer, dropout, num_layers,
-                loss_function, optimizer, weights_path, get_wandb,
-                teacher_forcing, validation_split, num_gpus, verbose)
+    train_model(prots, mols, config['num_epochs'], config['learning_rate'],
+                config['batch_size'], config['d_model'], config['num_heads'],
+                config['ff_hidden_layer'], config['dropout'], config['num_layers'],
+                config['loss_function'], config['optimizer'], config['weights_path'],
+                config['get_wandb'], config['teacher_forcing'], config['validation_split'],
+                config['num_gpus'], config['verbose'])
     
     timef = time.time() - time0
     print('Time taken:', timef)
