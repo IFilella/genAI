@@ -175,9 +175,11 @@ class Tokenizer:
         
         self.mol_tokenizer = MolecularTokenizer()
         self.prot_tokenizer = ProteinTokenizer()
-
+        
+        self.special_tokens = self.prot_tokenizer.special_tokens
+        
         self.vocab_size = self.prot_tokenizer.vocab_size + self.mol_tokenizer.vocab_size\
-                            - len(self.mol_tokenizer.special_tokens) + 1 # +1 for the delimiter token
+                            - len(self.special_tokens) + 1 # +1 for the delimiter token
 
     def __call__(self, prots, mols, prot_max_length=600, mol_max_length=80):
         
@@ -236,7 +238,7 @@ class Tokenizer:
         decoded_tokens = []
         for token_id in token_ids:
             token = decoding_id2token.get(token_id, self.mol_tokenizer.unk_token)
-            if skip_special_tokens and token in self.mol_tokenizer.special_tokens:
+            if skip_special_tokens and token in self.special_tokens:
                 continue
             decoded_tokens.append(token)
         return ''.join(decoded_tokens)

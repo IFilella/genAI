@@ -76,7 +76,6 @@ def train_model(prot_seqs,
         num_gpus (int, optional): The number of GPUs to use. Defaults to 2.
         verbose (bool, optional): Whether to print model information. Defaults to False.
     """
-
     fabric = Fabric(accelerator='cuda', devices=num_gpus, num_nodes=1)
     fabric.launch()
 
@@ -100,7 +99,8 @@ def train_model(prot_seqs,
     # Load the DataLoaders and Initialize the tokenizers
     print('[Rank %d] Initializing the tokenizers...'%rank)
     tokenizer = Tokenizer()
-    vocab_size = tokenizer.vocab_size
+    # because the token ids should be inside the range of numbers in vocab_size
+    vocab_size = tokenizer.vocab_size + len(tokenizer.special_tokens)
     
     print('[Rank %d] Initializing the dataloaders...'%rank)
     train_dataloader = DataLoader(train_dataset,
@@ -116,7 +116,8 @@ def train_model(prot_seqs,
     # Model
     print('[Rank %d] Initializing the model...'%rank)
     model = MultiLayerTransformerDecoder(vocab_size, d_model, num_heads, ff_hidden_layer, dropout, num_layers)
-
+    model = fabric.to_device(model)
+    
     assert model.linear.out_features == vocab_size, f"Expected output layer size {vocab_size}, but got {model.linear.out_features}"
 
     # Print model information
@@ -158,7 +159,7 @@ def train_model(prot_seqs,
             
             input_tensor = batch['input_ids']
             input_att_mask = batch['attention_mask']
-
+            
             # Generate the shifted input tensor for teacher forcing
             # Apply teacher forcing only after the delimiter token
             batch_size = input_tensor.size(0)
@@ -183,7 +184,7 @@ def train_model(prot_seqs,
             input_att_mask = fabric.to_device(input_att_mask)
             
             logits = model(input_tensor, input_att_mask, tokenizer.delim_token_id)
-
+            
             # calculate the loss just for the second part (after the delimiter)
             # mask after the delimiter
             batch_size = input_tensor.size(0)
@@ -342,8 +343,4 @@ def main():
 
 if __name__ == '__main__':
 
-    os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
     main()
-
-

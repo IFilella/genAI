@@ -12,6 +12,7 @@ from torchinfo import summary
 from tokenizer import Tokenizer
 from lightning.fabric import Fabric
 
+
 fabric = Fabric(accelerator='cuda', devices=2, num_nodes=1)
 fabric.launch()
 rank = fabric.global_rank
@@ -231,7 +232,7 @@ if __name__ == '__main__':
     att_mask = fabric.to_device(att_mask)
     print('Input tensor shape:', input_tensor.shape)
     print('Attention mask shape:', att_mask.shape)
-
+    
     # Initialize the model with `num_layer` layers
     model = MultiLayerTransformerDecoder(vocab_size, d_model, num_heads, ff_hidden_layer, dropout, num_layers)
     model = fabric.to_device(model)
