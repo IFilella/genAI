@@ -213,7 +213,7 @@ class Tokenizer:
         
         # Concatenate tokenized protein, delimiter, and molecular sequences
         input_tensor = torch.cat((prot_input_ids, delim_input_ids, mols_input_ids), dim=1)
-        attention_mask = torch.cat((tokenized_prots['attention_mask'], torch.zeros_like(delim_input_ids), tokenized_mols['attention_mask']), dim=1)
+        attention_mask = torch.cat((prot_attention_mask, torch.zeros_like(delim_input_ids), mols_attention_mask), dim=1)
 
         return {'input_ids': input_tensor, 'attention_mask': attention_mask}
     
@@ -276,7 +276,7 @@ if __name__ == '__main__':
     tokenizer = Tokenizer()
     encoded_texts = tokenizer(prot_list, molecule_list, prot_max_length=600, mol_max_length=50)
     input_tensor, attention_mask = encoded_texts['input_ids'], encoded_texts['attention_mask']
-    
+
     print(tokenizer.vocab_size)
     print(prot_list[0], molecule_list[0])
     print(input_tensor[0])

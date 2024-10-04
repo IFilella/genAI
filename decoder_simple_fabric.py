@@ -159,9 +159,7 @@ class MultiLayerTransformerDecoder(nn.Module):
         target_mask = create_partial_mask(x, delim_tokenidx)
 
         x = self.embedding(x)
-        print('Embedding shape:', x.shape)
         x = self.pos_encoder(x)
-        print('Positional encoding shape:', x.shape)
         
         for transformer_block in self.transformer_blocks:
             # Generate a mask to prevent attention to future positions
@@ -204,7 +202,7 @@ if __name__ == '__main__':
     print('Input tensor shape:', input_tensor.shape)
     print(input_tensor)
 
-    delim_tokenidx = tokenizer.combined_vocab['<DELIM>']
+    delim_tokenidx = 33
     mask = create_partial_mask(input_tensor, delim_tokenidx)
     print('Mask shape:', mask.shape)
     print(mask)
@@ -213,7 +211,7 @@ if __name__ == '__main__':
     print('Mask2 shape:', mask2.shape)
     print(mask2)
     """
-
+    
     # TEST THE MULTI LAYER TRANSFORMER DECODER
 
     # Follow the same process as before
