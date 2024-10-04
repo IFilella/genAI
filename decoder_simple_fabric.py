@@ -57,12 +57,11 @@ class PositionalEncoding(nn.Module):
         pe[:, 1::2] = torch.cos(position * div_term)
         pe = pe.unsqueeze(0)
         self.pe = pe
-        #self.register_buffer("pe", nn.Parameter(pe, requires_grad=False))
-
+        
     def forward(self, x):
         x = fabric.to_device(x)
         self.pe = fabric.to_device(self.pe)
-        x = x + self.pe[:x.size(0), :]
+        x = x + self.pe[:, :x.size(1), :]
         return self.dropout(x)
 
 # We need to mask out input decoders to prevent attention to future positions
@@ -157,11 +156,13 @@ class MultiLayerTransformerDecoder(nn.Module):
         x = fabric.to_device(x)
         padding_mask = fabric.to_device(padding_mask)
 
-        target_mask = create_prefix_decoder_mask(x, delim_tokenidx)
+        target_mask = create_partial_mask(x, delim_tokenidx)
 
         x = self.embedding(x)
+        print('Embedding shape:', x.shape)
         x = self.pos_encoder(x)
-
+        print('Positional encoding shape:', x.shape)
+        
         for transformer_block in self.transformer_blocks:
             # Generate a mask to prevent attention to future positions
             # We mask just the molecules (the second half of the input)
@@ -183,9 +184,10 @@ if __name__ == '__main__':
     prot_seqs = [text.split('$')[0] for text in texts]
     smiles = [text.split('$')[1] for text in texts]
 
-    tokenizer.build_combined_vocab(prot_seqs, smiles)
-    input_tensor, vocab_size = tokenizer(prot_seqs, smiles)
-
+    tokenized_sequences = tokenizer(prot_seqs, smiles)
+    input_tensor = tokenized_sequences['input_ids']
+    att_mask = tokenized_sequences['attention_mask']
+    
     # Test masking functions
     """
     input_tensor = torch.tensor([[10, 39, 30, 25, 33, 15,  6,  5, 34,  9],
@@ -216,7 +218,7 @@ if __name__ == '__main__':
 
     # Follow the same process as before
     # Define the hyperparameters
-    vocab_size     = 10000
+    vocab_size     = tokenizer.vocab_size
     d_model        = 2048
     num_heads      = 2
     ff_hidden_layer  = 8*d_model
@@ -228,12 +230,14 @@ if __name__ == '__main__':
     # Create our input to the model to process
     #input_tensor = torch.randint(0, vocab_size, (context_length, batch_size))
     input_tensor = fabric.to_device(input_tensor)
+    att_mask = fabric.to_device(att_mask)
     print('Input tensor shape:', input_tensor.shape)
+    print('Attention mask shape:', att_mask.shape)
 
     # Initialize the model with `num_layer` layers
-    model = MultiLayerTransformerDecoder(vocab_size, d_model, num_heads, ff_hidden_layer, dropout, num_layers, device=rank)
+    model = MultiLayerTransformerDecoder(vocab_size, d_model, num_heads, ff_hidden_layer, dropout, num_layers)
     model = fabric.to_device(model)
 
-    output = model(input_tensor, tokenizer.combined_vocab['<DELIM>'])
+    output = model(input_tensor, att_mask, tokenizer.delim_token_id)
     print(output.shape)
 
