@@ -175,7 +175,7 @@ class Tokenizer:
         
         self.mol_tokenizer = MolecularTokenizer()
         self.prot_tokenizer = ProteinTokenizer()
-        
+
         self.vocab_size = self.prot_tokenizer.vocab_size + self.mol_tokenizer.vocab_size\
                             - len(self.mol_tokenizer.special_tokens) + 1 # +1 for the delimiter token
 
@@ -274,11 +274,10 @@ if __name__ == '__main__':
     
     # Example usage of Tokenizer
     tokenizer = Tokenizer()
-    print(tokenizer.vocab_size)
-    exit()
     encoded_texts = tokenizer(prot_list, molecule_list, prot_max_length=600, mol_max_length=50)
     input_tensor, attention_mask = encoded_texts['input_ids'], encoded_texts['attention_mask']
-
+    
+    print(tokenizer.vocab_size)
     print(prot_list[0], molecule_list[0])
     print(input_tensor[0])
     print(attention_mask[0])
