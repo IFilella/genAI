@@ -3,6 +3,8 @@ requirements.txt
 data/
 weights/
 wandb/
+plots/
+old_scripts/
 *.png
 *.json
 *.gv
