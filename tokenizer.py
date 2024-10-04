@@ -202,13 +202,13 @@ class Tokenizer:
         
         # Define delim_token_id based on the protein vocab size
         prot_vocab_size = self.prot_tokenizer.vocab_size
-        self.delim_token_id = prot_vocab_size + 1
+        self.delim_token_id = prot_vocab_size # not +1 because it is 0-indexed
         delim_input_ids = (torch.tensor([self.delim_token_id] * len(prots))).unsqueeze(1)
         
         # Redefine molecular token_ids to avoid duplicate token_ids between mol and prot
         special_token_ids = torch.tensor([self.mol_tokenizer.cls_token_id, self.mol_tokenizer.pad_token_id, self.mol_tokenizer.eos_token_id, self.mol_tokenizer.unk_token_id])
         mask = ~torch.isin(mols_input_ids, special_token_ids)
-        mols_input_ids[mask] += (prot_vocab_size + 2)
+        mols_input_ids[mask] += (prot_vocab_size + 1) # not +2 because it is 0-indexed
         
         # Concatenate tokenized protein, delimiter, and molecular sequences
         input_tensor = torch.cat((prot_input_ids, delim_input_ids, mols_input_ids), dim=1)
@@ -217,9 +217,24 @@ class Tokenizer:
         return {'input_ids': input_tensor, 'attention_mask': attention_mask}
     
     def decode(self, token_ids, skip_special_tokens=True):
+        # update the id2token and token2id mappings
+        updated_mol_token2id = {}
+        for token, idx in self.mol_tokenizer.token2id.items():
+            if token not in self.mol_tokenizer.special_tokens:
+                updated_mol_token2id[token] = idx + self.prot_tokenizer.vocab_size + 1
+            else:
+                updated_mol_token2id[token] = idx
+        
+        updated_mol_id2token = {idx: token for token, idx in updated_mol_token2id.items()}
+        
+        # join the protein and the updated delim and molecular id2token mappings
+        # Not token2id because the token is the same between the two tokenizers
+        delim_id2token = {self.delim_token_id: self.delim_token}
+        decoding_id2token = {**self.prot_tokenizer.id2token,**delim_id2token, **updated_mol_id2token}
+        
         decoded_tokens = []
         for token_id in token_ids:
-            token = self.mol_tokenizer.id2token.get(token_id, self.mol_tokenizer.unk_token)
+            token = decoding_id2token.get(token_id, self.mol_tokenizer.unk_token)
             if skip_special_tokens and token in self.mol_tokenizer.special_tokens:
                 continue
             decoded_tokens.append(token)
@@ -264,12 +279,12 @@ if __name__ == '__main__':
     print(prot_list[0], molecule_list[0])
     print(input_tensor[0])
     print(attention_mask[0])
-    exit()
+    
     test_to_decode = [ 0, 14, 20,  7, 23, 12, 13, 21, 21, 21,  9,  4,  9,  9, 21,  9, 12, 19,
                         4, 13, 20, 11, 17, 13, 11, 17, 15, 10,  8, 21,  6,  7, 23,  6, 16, 20,
                         11,  7,  6, 19, 23, 18, 12, 17, 21, 21, 11,  6,  9,  7, 20, 21, 16, 14,
-                        21, 13, 21,  9, 15,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1, 25, 30,
-                        30, 66, 62, 32, 67, 32, 30, 51, 62, 30, 30, 62, 30, 30, 62, 30, 51,  2,
+                        21, 13, 21,  9, 15,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1, 24, 29,
+                        29, 65, 61, 31, 66, 31, 29, 50, 61, 29, 29, 61, 29, 29, 61, 29, 50,  2,
                         1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,
                         1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1]
     
