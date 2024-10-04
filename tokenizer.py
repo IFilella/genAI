@@ -46,7 +46,7 @@ class MolecularTokenizer:
         self.eos_token_id = self.token2id[self.eos_token]
         self.unk_token_id = self.token2id[self.unk_token]
 
-    def __call__(self, molecule_list, truncation=True, padding=True, max_length=80, return_tensors="pt"):
+    def __call__(self, molecule_list, truncation=True, padding=True, max_length=80):
 
         all_input_ids = []
         all_attention_masks = []
@@ -120,7 +120,7 @@ class ProteinTokenizer():
         self.eos_token_id = self.token2id[self.eos_token]
         self.unk_token_id = self.token2id[self.unk_token]
 
-    def __call__(self, protein_list, truncation=True, padding=True, max_length=600, return_tensors="pt"):
+    def __call__(self, protein_list, truncation=True, padding=True, max_length=600):
 
         all_input_ids = []
         all_attention_masks = []
@@ -177,16 +177,14 @@ class Tokenizer:
         self.prot_tokenizer = ProteinTokenizer()
 
         #self.special_tokens = [self.mol_tokenizer.cls_token, self.mol_tokenizer.pad_token, self.mol_tokenizer.eos_token, self.mol_tokenizer.unk_token, self.delim_token]
-         
+
     def __call__(self, prots, mols, prot_max_length=600, mol_max_length=80):
         
         # Tokenize separately for protein, delimiter, and molecular sequences
+        tokenized_prots = self.prot_tokenizer(prots, padding=True, truncation=True, max_length=prot_max_length)
         tokenized_mols = self. mol_tokenizer(mols, padding=True, truncation=True, max_length=mol_max_length)
-        tokenized_prots = self.prot_tokenizer(prots, padding=True, truncation=True, max_length=prot_max_length, return_tensors='pt')
-       
-        prot_vocab_size = self.prot_tokenizer.vocab_size
-
-        # Remove eos id of prot input_ids and corresponding attention_mask
+        
+        # Remove eos token id of prot input_ids and corresponding attention_mask
         eos_prot_id = self.prot_tokenizer.eos_token_id
         mask = tokenized_prots['input_ids'] != eos_prot_id
         prot_input_ids = [seq[mask[idx]] for idx, seq in enumerate(tokenized_prots['input_ids'])]
@@ -194,7 +192,7 @@ class Tokenizer:
         prot_attention_mask = [seq[mask[idx]] for idx, seq in enumerate(tokenized_prots['attention_mask'])]
         prot_attention_mask = torch.stack(prot_attention_mask)
         
-        # Remove cls of mol
+        # Remove cls token id of mol input_ids and corresponding attention_mask
         cls_mol_id = self.mol_tokenizer.cls_token_id
         mask = tokenized_mols['input_ids'] != cls_mol_id
         mols_input_ids = [seq[mask[idx]] for idx, seq in enumerate(tokenized_mols['input_ids'])]
@@ -202,30 +200,27 @@ class Tokenizer:
         mols_attention_mask = [seq[mask[idx]] for idx, seq in enumerate(tokenized_mols['attention_mask'])]
         mols_attention_mask = torch.stack(mols_attention_mask)
         
-        # Define delim_token_id
+        # Define delim_token_id based on the protein vocab size
+        prot_vocab_size = self.prot_tokenizer.vocab_size
         self.delim_token_id = prot_vocab_size + 1
-        self.mol_tokenizer.special_tokens
-
+        delim_input_ids = (torch.tensor([self.delim_token_id] * len(prots))).unsqueeze(1)
+        
         # Redefine molecular token_ids to avoid duplicate token_ids between mol and prot
-        print(mols_input_ids)
-        for input_ids in mols_input_ids:
-            print(input_ids)
-            input_ids = [token.item() + prot_vocab_size + 2 for token in input_ids if token.item() not in self.mol_tokenizer.special_tokens]
-            print(input_ids)
-        exit()
-        print(mols_input_ids)
-
-        tokenized_delim = (torch.tensor([self.token2id[self.delim_token]] * len(prots))).unsqueeze(1)
-        input_tensor = torch.cat((tokenized_prots['input_ids'], tokenized_delim, tokenized_mols['input_ids']), dim=1)
-        attention_mask = torch.cat((tokenized_prots['attention_mask'], torch.ones_like(tokenized_delim), tokenized_mols['attention_mask']), dim=1)
+        special_token_ids = torch.tensor([self.mol_tokenizer.cls_token_id, self.mol_tokenizer.pad_token_id, self.mol_tokenizer.eos_token_id, self.mol_tokenizer.unk_token_id])
+        mask = ~torch.isin(mols_input_ids, special_token_ids)
+        mols_input_ids[mask] += (prot_vocab_size + 2)
+        
+        # Concatenate tokenized protein, delimiter, and molecular sequences
+        input_tensor = torch.cat((prot_input_ids, delim_input_ids, mols_input_ids), dim=1)
+        attention_mask = torch.cat((tokenized_prots['attention_mask'], torch.zeros_like(delim_input_ids), tokenized_mols['attention_mask']), dim=1)
 
         return {'input_ids': input_tensor, 'attention_mask': attention_mask}
     
     def decode(self, token_ids, skip_special_tokens=True):
         decoded_tokens = []
         for token_id in token_ids:
-            token = self.id2token.get(token_id, self.mol_tokenizer.unk_token)
-            if skip_special_tokens and token in self.special_tokens:
+            token = self.mol_tokenizer.id2token.get(token_id, self.mol_tokenizer.unk_token)
+            if skip_special_tokens and token in self.mol_tokenizer.special_tokens:
                 continue
             decoded_tokens.append(token)
         return ''.join(decoded_tokens)
@@ -233,17 +228,17 @@ class Tokenizer:
 
 if __name__ == '__main__':
     
-    # Some trials here
+    # Some examples here to test the tokenizers
     from data.fake_data import texts
     prot_list = [x.split('$')[0] for x in texts]
     molecule_list = [x.split('$')[-1] for x in texts]
     # print(prot_list, len(prot_list))
     # print(molecule_list, len(molecule_list))
-   
+    
     # Example usage of molecular tokenizer
     """
     molecular_tokenizer = MolecularTokenizer()
-    encoded_molecule = molecular_tokenizer(molecule_list, truncation=True, padding=True, max_length=80, return_tensors="pt")
+    encoded_molecule = molecular_tokenizer(molecule_list, truncation=True, padding=True, max_length=80)
     print(molecular_tokenizer.vocab)
     print(encoded_molecule['input_ids'])
     print(encoded_molecule['input_ids'][0])
@@ -251,37 +246,32 @@ if __name__ == '__main__':
     print(molecular_tokenizer.id2token)
     print(molecular_tokenizer.decode([2,  4,  4, 40, 36,  6, 41,  6,  4, 25, 36,  4,  4, 36,  4,  4, 36,  4, 25,  3,  0,  0,  0,  0,  0]))
     """
-   
+
     # Example usage of protein tokenizer
     """
     prot_tokenizer = ProteinTokenizer()
-    encoded_prots = prot_tokenizer(prot_list, padding=True, truncation=True, max_length=600, return_tensors='pt')
+    encoded_prots = prot_tokenizer(prot_list, padding=True, truncation=True, max_length=600)
     print(encoded_prots['input_ids'])
     print(prot_tokenizer.vocab_size)
     print(prot_tokenizer.get_vocab())
     """
-    # Example usage of Tokenizer
     
+    # Example usage of Tokenizer
     tokenizer = Tokenizer()
-    encoded_texts = tokenizer(prot_list, molecule_list, prot_max_length=600, mol_max_length=80)
-    exit()
+    encoded_texts = tokenizer(prot_list, molecule_list, prot_max_length=600, mol_max_length=50)
     input_tensor, attention_mask = encoded_texts['input_ids'], encoded_texts['attention_mask']
 
     print(prot_list[0], molecule_list[0])
     print(input_tensor[0])
     print(attention_mask[0])
-    print(tokenizer.combined_vocab)
-    print(tokenizer.vocab_size)
-
-    
-    test_to_decode = [ 0, 20, 11,  9, 19, 15,  4,  7,  7,  7,  6,  5,  6,  6,  7,  6, 15,  8,
-                        5,  4, 11, 12, 16,  4, 12, 16, 17, 21, 18,  7, 13,  9, 19, 13, 14, 11,
-                        12,  9, 13,  8, 19, 10, 15, 16,  7,  7, 12, 13,  6,  9, 11,  7, 14, 20,
-                        7,  4,  7,  6, 17,  2,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,
+    exit()
+    test_to_decode = [ 0, 14, 20,  7, 23, 12, 13, 21, 21, 21,  9,  4,  9,  9, 21,  9, 12, 19,
+                        4, 13, 20, 11, 17, 13, 11, 17, 15, 10,  8, 21,  6,  7, 23,  6, 16, 20,
+                        11,  7,  6, 19, 23, 18, 12, 17, 21, 21, 11,  6,  9,  7, 20, 21, 16, 14,
+                        21, 13, 21,  9, 15,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1, 25, 30,
+                        30, 66, 62, 32, 67, 32, 30, 51, 62, 30, 30, 62, 30, 30, 62, 30, 51,  2,
                         1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,
-                        1,  1,  1,  1,  1,  1,  1,  1,  1,  1, 33,  0, 23, 23, 60, 56, 28, 61,
-                        28, 23, 45, 56, 23, 23, 56, 23, 23, 56, 23, 45,  2,  1,  1,  1,  1,  1,
-                        1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1]
+                        1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1]
     
     decoded_text = tokenizer.decode(test_to_decode, skip_special_tokens=True)
     print(decoded_text)
