@@ -14,6 +14,146 @@ import os
 import yaml
 from torchinfo import summary
 
+def prepare_data(prot_seqs, smiles, validation_split, batch_size, tokenizer, rank, verbose):
+    """Prepares datasets, splits them, and returns the dataloaders."""
+    
+    print('[Rank %d] Preparing the dataset...'%rank)
+    dataset = ProtMolDataset(prot_seqs, smiles)
+
+    print('[Rank %d] Splitting the dataset...'%rank)
+    val_size = int(validation_split * len(dataset))
+    train_size = len(dataset) - val_size
+    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+    if verbose:
+        print(f"[Rank {rank}] Train dataset size: {len(train_dataset)}, Validation dataset size: {len(val_dataset)}")
+
+    print('[Rank %d] Initializing the dataloaders...'%rank)
+    train_dataloader = DataLoader(train_dataset,
+                                  batch_size=batch_size,
+                                  shuffle=False,
+                                  collate_fn=lambda x: collate_fn(x, tokenizer))
+
+    val_dataloader = DataLoader(val_dataset,
+                                batch_size=batch_size,
+                                shuffle=False,
+                                collate_fn=lambda x: collate_fn(x, tokenizer))
+
+    return train_dataloader, val_dataloader
+
+def train_epoch(model, dataloader, criterion, optimizer, tokenizer, vocab_size, teacher_forcing, fabric):
+    """Train the model for one epoch."""
+    
+    model.train()
+
+    total_train_loss = 0
+    total_train_correct = 0
+    total_train_samples = 0
+
+    for i, batch in enumerate(dataloader):
+        
+        input_tensor = batch['input_ids']
+        input_att_mask = batch['attention_mask']
+        
+        # Generate the shifted input tensor for teacher forcing
+        # Apply teacher forcing only after the delimiter token
+        batch_size = input_tensor.size(0)
+        input_tensor_shifted = input_tensor.clone()
+        input_att_mask_shifted = input_att_mask.clone()
+        
+        if teacher_forcing:
+            for i in range(batch_size):
+                delim_idx = (input_tensor[i] == tokenizer.delim_token_id).nonzero(as_tuple=True)
+                if len(delim_idx[0]) > 0:
+                    start_idx = delim_idx[0].item() + 1
+                    if start_idx < input_tensor.size(1):
+                        input_tensor_shifted[i, start_idx:] = torch.cat([torch.zeros_like(input_tensor[i, start_idx:start_idx+1]), input_tensor[i, start_idx:-1]], dim=0)
+                        input_att_mask_shifted[i, start_idx:] = torch.cat([torch.zeros_like(input_att_mask[i, start_idx:start_idx+1]), input_att_mask[i, start_idx:-1]], dim=0)
+            input_tensor = input_tensor_shifted
+            input_att_mask = input_att_mask_shifted
+        else:
+            input_tensor = input_tensor
+            input_att_mask = input_att_mask
+
+        input_tensor = fabric.to_device(input_tensor)
+        input_att_mask = fabric.to_device(input_att_mask)
+        
+        logits = model(input_tensor, input_att_mask, tokenizer.delim_token_id)
+        
+        # calculate the loss just for the second part (after the delimiter)
+        # mask after the delimiter
+        batch_size = input_tensor.size(0)
+        loss_mask = torch.zeros_like(input_tensor, dtype=torch.bool)
+        for i in range(batch_size):
+            delim_idx = (input_tensor[i] == tokenizer.delim_token_id).nonzero(as_tuple=True)
+            if len(delim_idx[0]) > 0:
+                start_idx = delim_idx[0].item() + 1
+                loss_mask[i, start_idx:] = True
+                
+        # Apply mask to the logits and labels
+        logits = logits.view(batch_size, -1, vocab_size)
+        logits = logits[loss_mask]
+        labels = input_tensor[loss_mask]
+        
+        # Compute the loss
+        loss = criterion(logits, labels)
+        fabric.backward(loss)
+        optimizer.step()
+        optimizer.zero_grad(set_to_none=True)
+
+        _, preds = torch.max(logits, dim=1)
+        total_train_correct += (preds == labels).sum().item()
+        total_train_samples += labels.numel()
+
+        total_train_loss += loss.item()
+
+    train_acc = total_train_correct / total_train_samples
+
+    return total_train_loss, train_acc
+
+def validate_epoch(model, dataloader, criterion, tokenizer, vocab_size, fabric):
+    """Validate the model for one epoch."""
+    
+    model.eval()
+    
+    total_val_loss = 0
+    total_val_correct = 0
+    total_val_samples = 0
+
+    with torch.no_grad():
+        for batch in dataloader:
+            input_tensor = batch['input_ids']
+            input_att_mask = batch['attention_mask']
+            
+            input_tensor = fabric.to_device(input_tensor)
+            input_att_mask = fabric.to_device(input_att_mask)
+            
+            logits = model(input_tensor, input_att_mask, tokenizer.delim_token_id)
+
+            # Mask after the delimiter
+            batch_size = input_tensor.size(0)
+            loss_mask = torch.zeros_like(input_tensor, dtype=torch.bool)
+            for i in range(batch_size):
+                delim_idx = (input_tensor[i] == tokenizer.delim_token_id).nonzero(as_tuple=True)
+                if len(delim_idx[0]) > 0:
+                    start_idx = delim_idx[0].item() + 1
+                    loss_mask[i, start_idx:] = True
+            
+            logits = logits.view(batch_size, -1, vocab_size)
+            logits = logits[loss_mask]
+            labels = input_tensor[loss_mask]
+            
+            # Compute the loss
+            loss = criterion(logits, labels)
+
+            _, preds = torch.max(logits, dim=1)
+            total_val_correct += (preds == labels).sum().item()
+            total_val_samples += labels.numel()
+
+            total_val_loss += loss.item()
+
+    val_acc = total_val_correct / total_val_samples
+
+    return total_val_loss, val_acc
 
 # TRAINING FUNCTION
 def train_model(prot_seqs,
@@ -62,40 +202,17 @@ def train_model(prot_seqs,
     fabric = Fabric(accelerator='cuda', devices=num_gpus, num_nodes=1)
     fabric.launch()
     fabric.seed_everything(1234)
-    
     rank = fabric.global_rank
-    print(rank)
 
+    # Enable memory tracking
     torch.cuda.memory._record_memory_history(max_entries=100000)
     
-    # Load the Dataset
-    print('[Rank %d] Preparing the dataset...'%rank)
-    dataset = ProtMolDataset(prot_seqs, smiles)
-    
-    # Split the dataset into training and validation sets
-    print('[Rank %d] Splitting the dataset...'%rank)
-    val_size = int(validation_split * len(dataset))
-    train_size = len(dataset) - val_size
-    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
-    if verbose:
-        print(f"[Rank {rank}] Train dataset size: {len(train_dataset)}, Validation dataset size: {len(val_dataset)}")
-
-    # Load the DataLoaders and Initialize the tokenizers
-    print('[Rank %d] Initializing the tokenizers...'%rank)
+    # Tokenizer initialization
     tokenizer = Tokenizer()
-    # because the token ids should be inside the range of numbers in vocab_size
-    vocab_size = tokenizer.vocab_size + len(tokenizer.special_tokens)
+    vocab_size = tokenizer.vocab_size + len(tokenizer.special_tokens) # because the token ids should be inside the range of numbers in vocab_size
     
-    print('[Rank %d] Initializing the dataloaders...'%rank)
-    train_dataloader = DataLoader(train_dataset,
-                                  batch_size=batch_size,
-                                  shuffle=False,
-                                  collate_fn=lambda x: collate_fn(x, tokenizer))
-
-    val_dataloader = DataLoader(val_dataset,
-                                batch_size=batch_size,
-                                shuffle=False,
-                                collate_fn=lambda x: collate_fn(x, tokenizer))
+    # Data preparation
+    train_dataloader, val_dataloader = prepare_data(prot_seqs, smiles, validation_split, batch_size, tokenizer, rank, verbose)
     
     # Model
     print('[Rank %d] Initializing the model...'%rank)
@@ -122,7 +239,7 @@ def train_model(prot_seqs,
     else:
         raise ValueError('Invalid optimizer. Please use "Adam"')
 
-    # Distribute the model to all available GPUs (using Fabric)
+    # Distribute the model using Fabric
     model, optimizer = fabric.setup(model, optimizer)
     train_dataloader = fabric.setup_dataloaders(train_dataloader)
     val_dataloader = fabric.setup_dataloaders(val_dataloader)
@@ -133,115 +250,15 @@ def train_model(prot_seqs,
 
     for epoch in range(num_epochs):
 
-        model.train()
-
-        total_train_loss = 0
-        total_train_correct = 0
-        total_train_samples = 0
-
-        for i, batch in enumerate(train_dataloader):
-            
-            input_tensor = batch['input_ids']
-            input_att_mask = batch['attention_mask']
-            
-            # Generate the shifted input tensor for teacher forcing
-            # Apply teacher forcing only after the delimiter token
-            batch_size = input_tensor.size(0)
-            input_tensor_shifted = input_tensor.clone()
-            input_att_mask_shifted = input_att_mask.clone()
-            
-            if teacher_forcing:
-                for i in range(batch_size):
-                    delim_idx = (input_tensor[i] == tokenizer.combined_vocab['<DELIM>']).nonzero(as_tuple=True)
-                    if len(delim_idx[0]) > 0:
-                        start_idx = delim_idx[0].item() + 1
-                        if start_idx < input_tensor.size(1):
-                            input_tensor_shifted[i, start_idx:] = torch.cat([torch.zeros_like(input_tensor[i, start_idx:start_idx+1]), input_tensor[i, start_idx:-1]], dim=0)
-                            input_att_mask_shifted[i, start_idx:] = torch.cat([torch.zeros_like(input_att_mask[i, start_idx:start_idx+1]), input_att_mask[i, start_idx:-1]], dim=0)
-                input_tensor = input_tensor_shifted
-                input_att_mask = input_att_mask_shifted
-            else:
-                input_tensor = input_tensor
-                input_att_mask = input_att_mask
-
-            input_tensor = fabric.to_device(input_tensor)
-            input_att_mask = fabric.to_device(input_att_mask)
-            
-            logits = model(input_tensor, input_att_mask, tokenizer.delim_token_id)
-            
-            # calculate the loss just for the second part (after the delimiter)
-            # mask after the delimiter
-            batch_size = input_tensor.size(0)
-            loss_mask = torch.zeros_like(input_tensor, dtype=torch.bool)
-            for i in range(batch_size):
-                delim_idx = (input_tensor[i] == tokenizer.delim_token_id).nonzero(as_tuple=True)
-                if len(delim_idx[0]) > 0:
-                    start_idx = delim_idx[0].item() + 1
-                    loss_mask[i, start_idx:] = True
-                    
-            # Apply mask to the logits and labels
-            logits = logits.view(batch_size, -1, vocab_size)
-            logits = logits[loss_mask]
-            labels = input_tensor[loss_mask]
-            
-            # Compute the loss
-            loss = criterion(logits, labels)
-            fabric.backward(loss)
-            optimizer.step()
-            optimizer.zero_grad(set_to_none=True)
-
-            _, preds = torch.max(logits, dim=1)
-            total_train_correct += (preds == labels).sum().item()
-            total_train_samples += labels.numel()
-
-            total_train_loss += loss.item()
-
-        train_acc = total_train_correct / total_train_samples
-
-        print(f"[Rank {rank}] Epoch {epoch+1}/{num_epochs}, Train Loss: {total_train_loss}, Train Accuracy: {train_acc}")
+        # training
+        total_train_loss, train_acc = train_epoch(model, train_dataloader, criterion, optimizer, tokenizer, vocab_size, teacher_forcing, fabric)
     
         # validation
-        model.eval()
-        total_val_loss = 0
-        total_val_correct = 0
-        total_val_samples = 0
+        total_val_loss, val_acc = validate_epoch(model, val_dataloader, criterion, tokenizer, vocab_size, fabric)
 
-        with torch.no_grad():
-            for batch in val_dataloader:
-                input_tensor = batch['input_ids']
-                input_att_mask = batch['attention_mask']
-                
-                input_tensor = fabric.to_device(input_tensor)
-                input_att_mask = fabric.to_device(input_att_mask)
-                
-                logits = model(input_tensor, input_att_mask, tokenizer.delim_token_id)
-
-                # Mask after the delimiter
-                batch_size = input_tensor.size(0)
-                loss_mask = torch.zeros_like(input_tensor, dtype=torch.bool)
-                for i in range(batch_size):
-                    delim_idx = (input_tensor[i] == tokenizer.delim_token_id).nonzero(as_tuple=True)
-                    if len(delim_idx[0]) > 0:
-                        start_idx = delim_idx[0].item() + 1
-                        loss_mask[i, start_idx:] = True
-                
-                logits = logits.view(batch_size, -1, vocab_size)
-                logits = logits[loss_mask]
-                labels = input_tensor[loss_mask]
-                
-                # Compute the loss
-                loss = criterion(logits, labels)
-
-                _, preds = torch.max(logits, dim=1)
-                total_val_correct += (preds == labels).sum().item()
-                total_val_samples += labels.numel()
-
-                total_val_loss += loss.item()
-
-        val_acc = total_val_correct / total_val_samples
-
-        print(f"[Rank {rank}] Epoch {epoch+1}/{num_epochs}, Validation Loss: {total_val_loss}, Validation Accuracy: {val_acc}")
-
+        # Print the metrics
+        print(f"[Rank {rank}] Epoch {epoch+1}/{num_epochs}, Train Loss: {total_train_loss}, Train Accuracy: {train_acc}, Validation Loss: {total_val_loss}, Validation Accuracy: {val_acc}")
+        
         if get_wandb:
             # log metrics to wandb
             wandb.log({"Epoch": epoch+1, "Train Loss": total_train_loss, "Train Accuracy": train_acc,
@@ -254,6 +271,7 @@ def train_model(prot_seqs,
 
     print('[Rank %d] Training complete!'%rank)
     
+    # Disable memory tracking
     if verbose:
         torch.cuda.memory._dump_snapshot('memory_snapshot.pickle')
     torch.cuda.memory._record_memory_history(enabled=None)
