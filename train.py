@@ -61,24 +61,22 @@ def train_epoch(model, dataloader, criterion, optimizer, tokenizer, vocab_size,
         # Apply teacher forcing only after the delimiter token
         batch_size = input_tensor.size(0)
         input_tensor_shifted = input_tensor.clone()
-        input_att_mask_shifted = input_att_mask.clone()
         
         if teacher_forcing:
             for i in range(batch_size):
                 delim_idx = (input_tensor[i] == tokenizer.delim_token_id).nonzero(as_tuple=True)
                 if len(delim_idx[0]) > 0:
-                    start_idx = delim_idx[0].item() + 1
+                    start_idx = delim_idx[0].item() + 1 # start after the delimiter
                     if start_idx < input_tensor.size(1):
-                        input_tensor_shifted[i, start_idx:] = torch.cat([torch.zeros_like(input_tensor[i, start_idx:start_idx+1]),
-                                                                         input_tensor[i, start_idx:-1]], dim=0)
-                        input_att_mask_shifted[i, start_idx:] = torch.cat([torch.zeros_like(input_att_mask[i, start_idx:start_idx+1]),
-                                                                           input_att_mask[i, start_idx:-1]], dim=0)
+                        # shift the tokens after the delimiter by 1 position
+                        input_tensor_shifted[i, start_idx:] = torch.roll(input_tensor[i, start_idx:], shifts=1, dims=0)
+                        # the first token after the delimiter should be the padding token
+                        input_tensor_shifted[i, start_idx] = tokenizer.mol_tokenizer.pad_token_id
+                        # It is not necessary to shift the attention mask
             input_tensor = input_tensor_shifted
-            input_att_mask = input_att_mask_shifted
         else:
             input_tensor = input_tensor
-            input_att_mask = input_att_mask
-
+        
         input_tensor = fabric.to_device(input_tensor)
         input_att_mask = fabric.to_device(input_att_mask)
         
@@ -92,19 +90,23 @@ def train_epoch(model, dataloader, criterion, optimizer, tokenizer, vocab_size,
             delim_idx = (input_tensor[i] == tokenizer.delim_token_id).nonzero(as_tuple=True)
             if len(delim_idx[0]) > 0:
                 start_idx = delim_idx[0].item() + 1
-                loss_mask[i, start_idx:] = True
+                if start_idx < input_tensor.size(1): # check if there are tokens after the delimiter
+                    loss_mask[i, start_idx:] = True
                 
         # Apply mask to the logits and labels
-        logits = logits.view(batch_size, -1, vocab_size)
-        logits = logits[loss_mask]
-        labels = input_tensor[loss_mask]
+        logits = logits.view(batch_size, -1, vocab_size) # [batch_size, seq_len, vocab_size]
+        logits = logits[loss_mask] # [num_tokens, vocab_size]
+        labels = input_tensor[loss_mask] # [num_tokens]
         
         # Compute the loss
         loss = criterion(logits, labels)
+        
+        # Backward pass and optimization
         fabric.backward(loss)
         optimizer.step()
-        optimizer.zero_grad(set_to_none=True)
+        optimizer.zero_grad(set_to_none=True) # set_to_none=True to save memory
 
+        # Calculate the accuracy
         _, preds = torch.max(logits, dim=1)
         total_train_correct += (preds == labels).sum().item()
         total_train_samples += labels.numel()
@@ -141,7 +143,8 @@ def validate_epoch(model, dataloader, criterion, tokenizer, vocab_size, fabric):
                 delim_idx = (input_tensor[i] == tokenizer.delim_token_id).nonzero(as_tuple=True)
                 if len(delim_idx[0]) > 0:
                     start_idx = delim_idx[0].item() + 1
-                    loss_mask[i, start_idx:] = True
+                    if start_idx < input_tensor.size(1):
+                        loss_mask[i, start_idx:] = True
             
             logits = logits.view(batch_size, -1, vocab_size)
             logits = logits[loss_mask]
@@ -150,6 +153,7 @@ def validate_epoch(model, dataloader, criterion, tokenizer, vocab_size, fabric):
             # Compute the loss
             loss = criterion(logits, labels)
 
+            # Calculate the accuracy
             _, preds = torch.max(logits, dim=1)
             total_val_correct += (preds == labels).sum().item()
             total_val_samples += labels.numel()

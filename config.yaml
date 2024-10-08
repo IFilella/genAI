@@ -13,7 +13,7 @@ learning_rate: 0.0001
 loss_function: 'crossentropy'
 optimizer: 'Adam'
 weights_path: 'weights/best_model_weights.pth'
-teacher_forcing: False
+teacher_forcing: True
 validation_split: 0.2
 get_wandb: False
 wandb_project: 'train_decoder_parallel'
