@@ -22,7 +22,8 @@ class DecoderBlock(nn.Module):
     def __init__(self, d_model, num_heads, ff_hidden_layer, dropout):
         super(DecoderBlock, self).__init__()
 
-        self.self_attention = nn.MultiheadAttention(d_model, num_heads, dropout=dropout, batch_first=True)
+        self.self_attention = nn.MultiheadAttention(d_model, num_heads,
+                                                    dropout=dropout, batch_first=True)
         self.norm1 = nn.LayerNorm(d_model)
         self.dropout1 = nn.Dropout(dropout)
         self.linear1 = nn.Linear(d_model, ff_hidden_layer)
@@ -37,7 +38,9 @@ class DecoderBlock(nn.Module):
         padding_mask = padding_mask.to(dtype=torch.float32)
         target_mask = target_mask.to(dtype=torch.float32)
         
-        attn_output, _ = self.self_attention(x, x, x, key_padding_mask=padding_mask, attn_mask=target_mask)
+        attn_output, _ = self.self_attention(x, x, x,
+                                             key_padding_mask=padding_mask,
+                                             attn_mask=target_mask)
         x = x + self.dropout1(attn_output)
         x = self.norm1(x)
         ff_output = self.linear2(F.relu(self.linear1(x)))
@@ -132,7 +135,8 @@ def create_prefix_decoder_mask(sequence, token_id=33):
             subsequent_mask = generate_square_subsequent_mask(seq_length - start_idx)
             mask[start_idx:, start_idx:] = subsequent_mask
 
-        # Apply -inf to prevent the prefix (rows 0 to start_idx-1) from attending to tokens after the prefix (columns start_idx to seq_length-1)
+        # Apply -inf to prevent the prefix (rows 0 to start_idx-1) from attending
+        # to tokens after the prefix (columns start_idx to seq_length-1)
         mask[:start_idx, start_idx:] = float('-inf')
 
     return mask
@@ -234,7 +238,8 @@ if __name__ == '__main__':
     print('Attention mask shape:', att_mask.shape)
     
     # Initialize the model with `num_layer` layers
-    model = MultiLayerTransformerDecoder(vocab_size, d_model, num_heads, ff_hidden_layer, dropout, num_layers)
+    model = MultiLayerTransformerDecoder(vocab_size, d_model, num_heads,
+                                         ff_hidden_layer, dropout, num_layers)
     model = fabric.to_device(model)
 
     output = model(input_tensor, att_mask, tokenizer.delim_token_id)

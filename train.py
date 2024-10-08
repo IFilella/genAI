@@ -14,7 +14,8 @@ import os
 import yaml
 from torchinfo import summary
 
-def prepare_data(prot_seqs, smiles, validation_split, batch_size, tokenizer, rank, verbose):
+def prepare_data(prot_seqs, smiles, validation_split, batch_size, tokenizer,
+                 rank, verbose):
     """Prepares datasets, splits them, and returns the dataloaders."""
     
     print('[Rank %d] Preparing the dataset...'%rank)
@@ -25,7 +26,8 @@ def prepare_data(prot_seqs, smiles, validation_split, batch_size, tokenizer, ran
     train_size = len(dataset) - val_size
     train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
     if verbose:
-        print(f"[Rank {rank}] Train dataset size: {len(train_dataset)}, Validation dataset size: {len(val_dataset)}")
+        print(f"[Rank {rank}] Train dataset size: {len(train_dataset)}, "\
+              f"Validation dataset size: {len(val_dataset)}")
 
     print('[Rank %d] Initializing the dataloaders...'%rank)
     train_dataloader = DataLoader(train_dataset,
@@ -40,7 +42,8 @@ def prepare_data(prot_seqs, smiles, validation_split, batch_size, tokenizer, ran
 
     return train_dataloader, val_dataloader
 
-def train_epoch(model, dataloader, criterion, optimizer, tokenizer, vocab_size, teacher_forcing, fabric):
+def train_epoch(model, dataloader, criterion, optimizer, tokenizer, vocab_size,
+                teacher_forcing, fabric):
     """Train the model for one epoch."""
     
     model.train()
@@ -66,8 +69,10 @@ def train_epoch(model, dataloader, criterion, optimizer, tokenizer, vocab_size, 
                 if len(delim_idx[0]) > 0:
                     start_idx = delim_idx[0].item() + 1
                     if start_idx < input_tensor.size(1):
-                        input_tensor_shifted[i, start_idx:] = torch.cat([torch.zeros_like(input_tensor[i, start_idx:start_idx+1]), input_tensor[i, start_idx:-1]], dim=0)
-                        input_att_mask_shifted[i, start_idx:] = torch.cat([torch.zeros_like(input_att_mask[i, start_idx:start_idx+1]), input_att_mask[i, start_idx:-1]], dim=0)
+                        input_tensor_shifted[i, start_idx:] = torch.cat([torch.zeros_like(input_tensor[i, start_idx:start_idx+1]),
+                                                                         input_tensor[i, start_idx:-1]], dim=0)
+                        input_att_mask_shifted[i, start_idx:] = torch.cat([torch.zeros_like(input_att_mask[i, start_idx:start_idx+1]),
+                                                                           input_att_mask[i, start_idx:-1]], dim=0)
             input_tensor = input_tensor_shifted
             input_att_mask = input_att_mask_shifted
         else:
@@ -212,14 +217,18 @@ def train_model(prot_seqs,
     vocab_size = tokenizer.vocab_size
     
     # Data preparation
-    train_dataloader, val_dataloader = prepare_data(prot_seqs, smiles, validation_split, batch_size, tokenizer, rank, verbose)
+    train_dataloader, val_dataloader = prepare_data(prot_seqs, smiles,
+                                                    validation_split, batch_size,
+                                                    tokenizer, rank, verbose)
     
     # Model
     print('[Rank %d] Initializing the model...'%rank)
-    model = MultiLayerTransformerDecoder(vocab_size, d_model, num_heads, ff_hidden_layer, dropout, num_layers)
+    model = MultiLayerTransformerDecoder(vocab_size, d_model, num_heads,
+                                         ff_hidden_layer, dropout, num_layers)
     model = fabric.to_device(model)
     
-    assert model.linear.out_features == vocab_size, f"Expected output layer size {vocab_size}, but got {model.linear.out_features}"
+    assert model.linear.out_features == vocab_size,\
+    f"Expected output layer size {vocab_size}, but got {model.linear.out_features}"
 
     # Print model information
     if verbose:
@@ -227,7 +236,8 @@ def train_model(prot_seqs,
 
     # TO DO: Add support for other loss functions and optimizers
     # Loss function
-    padding_token_id = tokenizer.mol_tokenizer.token2id['<pad>'] # Ensure that padding tokens are masked during training to prevent the model from learning to generate them.
+    padding_token_id = tokenizer.mol_tokenizer.token2id['<pad>'] 
+    # Ensure that padding tokens are masked during training to prevent the model from learning to generate them.
     if loss_function == 'crossentropy':
         criterion = nn.CrossEntropyLoss(ignore_index=padding_token_id)
     else:
@@ -251,13 +261,20 @@ def train_model(prot_seqs,
     for epoch in range(num_epochs):
 
         # training
-        total_train_loss, train_acc = train_epoch(model, train_dataloader, criterion, optimizer, tokenizer, vocab_size, teacher_forcing, fabric)
+        total_train_loss, train_acc = train_epoch(model, train_dataloader,
+                                                  criterion, optimizer,
+                                                  tokenizer, vocab_size,
+                                                  teacher_forcing, fabric)
     
         # validation
-        total_val_loss, val_acc = validate_epoch(model, val_dataloader, criterion, tokenizer, vocab_size, fabric)
+        total_val_loss, val_acc = validate_epoch(model, val_dataloader,
+                                                 criterion, tokenizer,
+                                                 vocab_size, fabric)
 
         # Print the metrics
-        print(f"[Rank {rank}] Epoch {epoch+1}/{num_epochs}, Train Loss: {total_train_loss}, Train Accuracy: {train_acc}, Validation Loss: {total_val_loss}, Validation Accuracy: {val_acc}")
+        print(f"[Rank {rank}] Epoch {epoch+1}/{num_epochs}, "\
+              f"Train Loss: {total_train_loss}, Train Accuracy: {train_acc}, "\
+              f"Validation Loss: {total_val_loss}, Validation Accuracy: {val_acc}")
         
         if get_wandb:
             # log metrics to wandb
@@ -280,7 +297,9 @@ def parse_args():
     """Parse the command-line arguments."""
     
     parser = argparse.ArgumentParser(description='Train a Transformer Decoder model')
-    parser.add_argument('--config', type=str, default='config.yaml', help='Path to the configuration YAML file with all the parameters', required=True)
+    parser.add_argument('--config', type=str, default='config.yaml',
+                        help='Path to the configuration YAML file with all the parameters',
+                        required=True)
     return parser.parse_args()
 
 def load_config(config_path):

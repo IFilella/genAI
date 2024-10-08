@@ -138,7 +138,7 @@ class ProteinTokenizer():
         for protein in protein_list:
             tokens = [x for x in protein]
 
-            if truncation and len(tokens) > max_length - 2: # -2 to make space for cls    and eos tokens
+            if truncation and len(tokens) > max_length - 2: # -2 to make space for cls and eos tokens
                 tokens = tokens[:max_length - 2]
 
             tokens = [self.cls_token] + tokens + [self.eos_token]
@@ -209,13 +209,18 @@ class Tokenizer:
         delim_input_ids = (torch.tensor([self.delim_token_id] * len(prots))).unsqueeze(1)
         
         # Redefine molecular token_ids to avoid duplicate token_ids between mols and prots
-        special_token_ids = torch.tensor([self.mol_tokenizer.cls_token_id, self.mol_tokenizer.pad_token_id, self.mol_tokenizer.eos_token_id, self.mol_tokenizer.unk_token_id])
+        special_token_ids = torch.tensor([self.mol_tokenizer.cls_token_id,
+                                          self.mol_tokenizer.pad_token_id,
+                                          self.mol_tokenizer.eos_token_id,
+                                          self.mol_tokenizer.unk_token_id])
         mask = ~torch.isin(mols_input_ids, special_token_ids)
-        mols_input_ids[mask] += (prot_vocab_size + 1 - len(self.special_tokens)) # not +2 because it is 0-indexed and without special tokens
+        mols_input_ids[mask] += (prot_vocab_size + 1 - len(self.special_tokens))
+        # not +2 because it is 0-indexed and without special tokens
         
         # Concatenate tokenized protein, delimiter, and molecular sequences
         input_tensor = torch.cat((prot_input_ids, delim_input_ids, mols_input_ids), dim=1)
-        attention_mask = torch.cat((prot_attention_mask, torch.zeros_like(delim_input_ids), mols_attention_mask), dim=1)
+        attention_mask = torch.cat((prot_attention_mask, torch.zeros_like(delim_input_ids),
+                                    mols_attention_mask), dim=1)
 
         return {'input_ids': input_tensor, 'attention_mask': attention_mask}
     
