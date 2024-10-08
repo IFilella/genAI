@@ -113,9 +113,10 @@ def train_epoch(model, dataloader, criterion, optimizer, tokenizer, vocab_size,
 
         total_train_loss += loss.item()
 
+    avg_train_loss = total_train_loss / len(dataloader)
     train_acc = total_train_correct / total_train_samples
 
-    return total_train_loss, train_acc
+    return avg_train_loss, train_acc
 
 def validate_epoch(model, dataloader, criterion, tokenizer, vocab_size, fabric):
     """Validate the model for one epoch."""
@@ -160,9 +161,10 @@ def validate_epoch(model, dataloader, criterion, tokenizer, vocab_size, fabric):
 
             total_val_loss += loss.item()
 
+    avg_val_loss = total_val_loss / len(dataloader)
     val_acc = total_val_correct / total_val_samples
 
-    return total_val_loss, val_acc
+    return avg_val_loss, val_acc
 
 # TRAINING FUNCTION
 def train_model(prot_seqs,
@@ -265,25 +267,25 @@ def train_model(prot_seqs,
     for epoch in range(num_epochs):
 
         # training
-        total_train_loss, train_acc = train_epoch(model, train_dataloader,
+        avg_train_loss, train_acc = train_epoch(model, train_dataloader,
                                                   criterion, optimizer,
                                                   tokenizer, vocab_size,
                                                   teacher_forcing, fabric)
     
         # validation
-        total_val_loss, val_acc = validate_epoch(model, val_dataloader,
+        avg_val_loss, val_acc = validate_epoch(model, val_dataloader,
                                                  criterion, tokenizer,
                                                  vocab_size, fabric)
 
         # Print the metrics
         print(f"[Rank {rank}] Epoch {epoch+1}/{num_epochs}, "\
-              f"Train Loss: {total_train_loss}, Train Accuracy: {train_acc}, "\
-              f"Validation Loss: {total_val_loss}, Validation Accuracy: {val_acc}")
+              f"Train Loss: {avg_train_loss}, Train Accuracy: {train_acc}, "\
+              f"Validation Loss: {avg_val_loss}, Validation Accuracy: {val_acc}")
         
         if get_wandb:
             # log metrics to wandb
-            wandb.log({"Epoch": epoch+1, "Train Loss": total_train_loss, "Train Accuracy": train_acc,
-                        "Validation Loss": total_val_loss, "Validation Accuracy": val_acc})
+            wandb.log({"Epoch": epoch+1, "Train Loss": avg_train_loss, "Train Accuracy": train_acc,
+                        "Validation Loss": avg_val_loss, "Validation Accuracy": val_acc})
 
         # Save the model weights if validation accuracy improves
         if val_acc > best_val_accuracy:
