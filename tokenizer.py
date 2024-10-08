@@ -8,7 +8,7 @@ import json
 #mol_vocab = "CNOHPSFIKLBcnohpsfikl1234567890#=@[]()/\\-+"
 
 # TO DO: WHAT TO DO WITH THE SPECIAL CHARACTERS?? --> DECIDE WHAT TO DO WITH THEM
-left_characters = "Zr.eaVAugTRtWMdb<>*%:"
+# left_characters = "Zr.eaVAugTRtWMdb<>*%:"
 # The '\.' are ions that are not united with the molecule and I want to delete them
 # The '\*' are Appendix/extremes/whatever of the molecule, so I will delete just the *
 # The '%' means 2-digit ring number, so I want to preserve it (but maybe without separating the following 2-digit number)
@@ -208,10 +208,10 @@ class Tokenizer:
         self.delim_token_id = prot_vocab_size # not +1 because it is 0-indexed
         delim_input_ids = (torch.tensor([self.delim_token_id] * len(prots))).unsqueeze(1)
         
-        # Redefine molecular token_ids to avoid duplicate token_ids between mol and prot
+        # Redefine molecular token_ids to avoid duplicate token_ids between mols and prots
         special_token_ids = torch.tensor([self.mol_tokenizer.cls_token_id, self.mol_tokenizer.pad_token_id, self.mol_tokenizer.eos_token_id, self.mol_tokenizer.unk_token_id])
         mask = ~torch.isin(mols_input_ids, special_token_ids)
-        mols_input_ids[mask] += (prot_vocab_size + 1) # not +2 because it is 0-indexed
+        mols_input_ids[mask] += (prot_vocab_size + 1 - len(self.special_tokens)) # not +2 because it is 0-indexed and without special tokens
         
         # Concatenate tokenized protein, delimiter, and molecular sequences
         input_tensor = torch.cat((prot_input_ids, delim_input_ids, mols_input_ids), dim=1)
@@ -224,7 +224,7 @@ class Tokenizer:
         updated_mol_token2id = {}
         for token, idx in self.mol_tokenizer.token2id.items():
             if token not in self.mol_tokenizer.special_tokens:
-                updated_mol_token2id[token] = idx + self.prot_tokenizer.vocab_size + 1
+                updated_mol_token2id[token] = idx + self.prot_tokenizer.vocab_size + 1 - len(self.special_tokens)
             else:
                 updated_mol_token2id[token] = idx
         
@@ -287,8 +287,8 @@ if __name__ == '__main__':
     test_to_decode = [ 0, 14, 20,  7, 23, 12, 13, 21, 21, 21,  9,  4,  9,  9, 21,  9, 12, 19,
                         4, 13, 20, 11, 17, 13, 11, 17, 15, 10,  8, 21,  6,  7, 23,  6, 16, 20,
                         11,  7,  6, 19, 23, 18, 12, 17, 21, 21, 11,  6,  9,  7, 20, 21, 16, 14,
-                        21, 13, 21,  9, 15,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1, 24, 29,
-                        29, 65, 61, 31, 66, 31, 29, 50, 61, 29, 29, 61, 29, 29, 61, 29, 50,  2,
+                        21, 13, 21,  9, 15,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1, 24, 25,
+                        25, 61, 57, 27, 62, 27, 25, 46, 57, 25, 25, 57, 25, 25, 57, 25, 46,  2,
                         1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,
                         1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1]
     

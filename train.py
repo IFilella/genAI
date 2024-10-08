@@ -209,7 +209,7 @@ def train_model(prot_seqs,
     
     # Tokenizer initialization
     tokenizer = Tokenizer()
-    vocab_size = tokenizer.vocab_size + len(tokenizer.special_tokens) # because the token ids should be inside the range of numbers in vocab_size
+    vocab_size = tokenizer.vocab_size
     
     # Data preparation
     train_dataloader, val_dataloader = prepare_data(prot_seqs, smiles, validation_split, batch_size, tokenizer, rank, verbose)
