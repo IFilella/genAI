@@ -13,10 +13,6 @@ from tokenizer import Tokenizer
 from lightning.fabric import Fabric
 
 
-fabric = Fabric(accelerator='cuda', devices=2, num_nodes=1)
-fabric.launch()
-rank = fabric.global_rank
-
 # Decoder Block
 class DecoderBlock(nn.Module):
     def __init__(self, d_model, num_heads, ff_hidden_layer, dropout):
@@ -31,7 +27,7 @@ class DecoderBlock(nn.Module):
         self.norm2 = nn.LayerNorm(d_model)
         self.dropout2 = nn.Dropout(dropout)
 
-    def forward(self, x, padding_mask, target_mask):
+    def forward(self, x, padding_mask, target_mask, fabric):
         x = fabric.to_device(x)
         target_mask = fabric.to_device(target_mask)
         padding_mask = fabric.to_device(padding_mask)
@@ -62,7 +58,7 @@ class PositionalEncoding(nn.Module):
         pe = pe.unsqueeze(0)
         self.pe = pe
         
-    def forward(self, x):
+    def forward(self, x, fabric):
         x = fabric.to_device(x)
         self.pe = fabric.to_device(self.pe)
         x = x + self.pe[:, :x.size(1), :]
@@ -156,7 +152,7 @@ class MultiLayerTransformerDecoder(nn.Module):
         self.linear = nn.Linear(d_model, vocab_size)
         self.softmax = nn.LogSoftmax(dim=-1)
 
-    def forward(self, x, padding_mask, delim_tokenidx):
+    def forward(self, x, padding_mask, delim_tokenidx, fabric):
         x = x.long().clone()
         x = fabric.to_device(x)
         padding_mask = fabric.to_device(padding_mask)
@@ -164,13 +160,13 @@ class MultiLayerTransformerDecoder(nn.Module):
         target_mask = create_partial_mask(x, delim_tokenidx)
 
         x = self.embedding(x)
-        x = self.pos_encoder(x)
+        x = self.pos_encoder(x, fabric)
         
         for transformer_block in self.transformer_blocks:
             # Generate a mask to prevent attention to future positions
             # We mask just the molecules (the second half of the input)
             target_mask = fabric.to_device(target_mask)
-            x = transformer_block(x, padding_mask, target_mask)
+            x = transformer_block(x, padding_mask, target_mask, fabric)
 
         output = self.linear(x)
         output = self.softmax(output)
@@ -179,7 +175,11 @@ class MultiLayerTransformerDecoder(nn.Module):
 
 if __name__ == '__main__':
 
-
+    fabric = Fabric(accelerator='cuda', devices=2, num_nodes=1, strategy='ddp')
+    fabric.launch()
+    fabric.seed_everything(1234)
+    rank = fabric.global_rank
+    
     # TEST THE TOKENIZER CLASS
 
     tokenizer = Tokenizer()
@@ -191,7 +191,7 @@ if __name__ == '__main__':
     input_tensor = tokenized_sequences['input_ids']
     att_mask = tokenized_sequences['attention_mask']
     
-    # Test masking functions
+    # TEST MASKING FUNCTIONS
     """
     input_tensor = torch.tensor([[10, 39, 30, 25, 33, 15,  6,  5, 34,  9],
                                 [37, 20,  1, 28, 33, 14, 45, 44, 48, 16],
@@ -239,7 +239,7 @@ if __name__ == '__main__':
     
     # Initialize the model with `num_layer` layers
     model = MultiLayerTransformerDecoder(vocab_size, d_model, num_heads,
-                                         ff_hidden_layer, dropout, num_layers)
+                                         ff_hidden_layer, dropout, num_layers, fabric)
     model = fabric.to_device(model)
 
     output = model(input_tensor, att_mask, tokenizer.delim_token_id)

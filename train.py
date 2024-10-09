@@ -82,7 +82,7 @@ def train_epoch(model, dataloader, criterion, optimizer, tokenizer, vocab_size,
         input_tensor = fabric.to_device(input_tensor)
         input_att_mask = fabric.to_device(input_att_mask)
         
-        logits = model(input_tensor, input_att_mask, tokenizer.delim_token_id)
+        logits = model(input_tensor, input_att_mask, tokenizer.delim_token_id, fabric)
         
         # calculate the loss just for the second part (after the delimiter)
         # mask after the delimiter
@@ -136,7 +136,7 @@ def evaluate_epoch(model, dataloader, criterion, tokenizer, vocab_size, fabric):
             input_tensor = fabric.to_device(input_tensor)
             input_att_mask = fabric.to_device(input_att_mask)
             
-            logits = model(input_tensor, input_att_mask, tokenizer.delim_token_id)
+            logits = model(input_tensor, input_att_mask, tokenizer.delim_token_id, fabric)
 
             # Mask after the delimiter
             batch_size = input_tensor.size(0)
@@ -285,7 +285,7 @@ def train_model(prot_seqs,
         print(f"[Rank {rank}] Epoch {epoch+1}/{num_epochs}, "\
               f"Train Loss: {avg_train_loss:.4f}, Train Accuracy: {train_acc:.4f}, "\
               f"Validation Loss: {avg_val_loss:.4f}, Validation Accuracy: {val_acc:.4f}")
-        
+
         if get_wandb:
             # log metrics to wandb
             wandb.log({"Epoch": epoch+1, "Train Loss": avg_train_loss, "Train Accuracy": train_acc,
