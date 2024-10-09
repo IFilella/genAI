@@ -1,18 +1,19 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader, TensorDataset, Dataset, random_split
+from torch.utils.data import DataLoader, random_split
 from decoder_model import MultiLayerTransformerDecoder
 from utils.dataset import ProtMolDataset, collate_fn
 from utils.earlystopping import EarlyStopping
 from utils.configuration import load_config
 from tokenizer import Tokenizer
-import pandas as pd
 from lightning.fabric import Fabric
+from torchinfo import summary
+import pandas as pd
 import argparse
 import time
 import wandb
-from torchinfo import summary
+
 
 # DATA PREPARATION
 def prepare_data(prot_seqs, smiles, validation_split, batch_size, tokenizer,
@@ -118,8 +119,8 @@ def train_epoch(model, dataloader, criterion, optimizer, tokenizer, vocab_size,
 
     return avg_train_loss, train_acc
 
-def validate_epoch(model, dataloader, criterion, tokenizer, vocab_size, fabric):
-    """Validate the model for one epoch."""
+def evaluate_epoch(model, dataloader, criterion, tokenizer, vocab_size, fabric):
+    """Evaluate the model for one epoch."""
     
     model.eval()
     
@@ -210,7 +211,7 @@ def train_model(prot_seqs,
         num_gpus (int, optional): The number of GPUs to use. Defaults to 2.
         verbose (bool, optional): Whether to print model information. Defaults to False.
     """
-    fabric = Fabric(accelerator='cuda', devices=num_gpus, num_nodes=1, strategy='ddp')
+    fabric = Fabric(accelerator='cuda', devices=num_gpus, num_nodes=1, strategy='ddp', precision="bf16-mixed")
     fabric.launch()
     fabric.seed_everything(1234)
     rank = fabric.global_rank
@@ -276,7 +277,7 @@ def train_model(prot_seqs,
                                                 teacher_forcing, fabric)
     
         # validation
-        avg_val_loss, val_acc = validate_epoch(model, val_dataloader,
+        avg_val_loss, val_acc = evaluate_epoch(model, val_dataloader,
                                                 criterion, tokenizer,
                                                 vocab_size, fabric)
 
