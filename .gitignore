@@ -5,6 +5,8 @@ weights/
 wandb/
 plots/
 old_scripts/
+logs/
+utils/__pycache__/
 *.png
 *.json
 *.gv

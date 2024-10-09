@@ -3,49 +3,18 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset, Dataset, random_split
 from decoder_model import MultiLayerTransformerDecoder
-from dataset import ProtMolDataset, collate_fn
+from utils.dataset import ProtMolDataset, collate_fn
+from utils.earlystopping import EarlyStopping
+from utils.configuration import load_config
 from tokenizer import Tokenizer
 import pandas as pd
 from lightning.fabric import Fabric
 import argparse
 import time
 import wandb
-import os
-import yaml
 from torchinfo import summary
 
-class EarlyStopping:
-    def __init__(self, patience=5, delta=0, verbose=False):
-        self.patience = patience # Number of epochs to wait before stopping training
-        self.delta = delta # Minimum change in the monitored quantity to qualify as an improvement
-        self.counter = 0 # Counter to keep track of the number of epochs with no improvement
-        self.best_score = None
-        self.early_stop = False
-        self.verbose = verbose
-        
-    def __call__(self, val_loss, model, weights_path):
-        score = -val_loss
-        if self.best_score is None:
-            self.best_score = score
-            self.save_checkpoint(model, weights_path)
-            if self.verbose:
-                print(f'EarlyStopping: Validation score improved ({self.best_score:.6f} --> {score:.6f}).')
-        elif score < self.best_score + self.delta:
-            self.counter += 1
-            if self.verbose:
-                print(f'EarlyStopping: EarlyStopping counter: {self.counter} out of {self.patience}')
-            if self.counter >= self.patience:
-                self.early_stop = True
-        else:
-            self.best_score = score
-            self.save_checkpoint(model, weights_path)
-            self.counter = 0
-            if self.verbose:
-                print(f'EarlyStopping: Validation score improved ({self.best_score:.6f} --> {score:.6f}).  Resetting counter to 0.')
-            
-    def save_checkpoint(self, model, weights_path):
-        torch.save(model.state_dict(), weights_path)
-        
+# DATA PREPARATION
 def prepare_data(prot_seqs, smiles, validation_split, batch_size, tokenizer,
                  rank, verbose):
     """Prepares datasets, splits them, and returns the dataloaders."""
@@ -335,7 +304,6 @@ def train_model(prot_seqs,
         torch.cuda.memory._dump_snapshot('memory_snapshot.pickle')
     torch.cuda.memory._record_memory_history(enabled=None)
 
-# UTILITIES
 def parse_args():
     """Parse the command-line arguments."""
     
@@ -344,56 +312,6 @@ def parse_args():
                         help='Path to the configuration YAML file with all the parameters',
                         required=True)
     return parser.parse_args()
-
-def load_config(config_path):
-    """Loads the configuration file and returns a dictionary of the parameters."""
-    
-    with open(config_path, 'r') as file:
-        config = yaml.safe_load(file)
-        
-    # Load configuration variables
-    config_dict = {
-        'data_path': config['data_path'],
-        'col_prots': config['col_prots'],
-        'col_mols': config['col_mols'],
-        'd_model': config['d_model'],
-        'num_heads': config['num_heads'],
-        'ff_hidden_layer': config['ff_hidden_layer'],
-        'dropout': config['dropout'],
-        'num_layers': config['num_layers'],
-        'batch_size': config['batch_size'],
-        'num_epochs': config['num_epochs'],
-        'learning_rate': config['learning_rate'],
-        'loss_function': config['loss_function'],
-        'optimizer': config['optimizer'],
-        'weights_path': config['weights_path'],
-        'teacher_forcing': config['teacher_forcing'],
-        'validation_split': config['validation_split'],
-        'get_wandb': config['get_wandb'],
-        'num_gpus': config['num_gpus'],
-        'verbose': config['verbose'],
-        'wandb_project': config['wandb_project']
-    }
-    
-    # Add configuration for wandb if enabled
-    if config['get_wandb']:
-        config_dict['wandb'] = {
-            'wandb_project': config['wandb_project'],
-            'wandb_config': {
-                "learning_rate": config['learning_rate'],
-                "batch_size": config['batch_size'],
-                "num_epochs": config['num_epochs'],
-                "d_model": config['d_model'],
-                "num_heads": config['num_heads'],
-                "ff_hidden_layer": config['ff_hidden_layer'],
-                "dropout": config['dropout'],
-                "num_layers": config['num_layers'],
-                "architecture": "Decoder-only",
-                "dataset": "ChEMBL_BindingDB_sorted_sample10000",
-            }
-        }
-    
-    return config_dict
 
 def main():
 
