@@ -14,6 +14,38 @@ import os
 import yaml
 from torchinfo import summary
 
+class EarlyStopping:
+    def __init__(self, patience=5, delta=0, verbose=False):
+        self.patience = patience # Number of epochs to wait before stopping training
+        self.delta = delta # Minimum change in the monitored quantity to qualify as an improvement
+        self.counter = 0 # Counter to keep track of the number of epochs with no improvement
+        self.best_score = None
+        self.early_stop = False
+        self.verbose = verbose
+        
+    def __call__(self, val_loss, model, weights_path):
+        score = -val_loss
+        if self.best_score is None:
+            self.best_score = score
+            self.save_checkpoint(model, weights_path)
+            if self.verbose:
+                print(f'EarlyStopping: Validation score improved ({self.best_score:.6f} --> {score:.6f}).')
+        elif score < self.best_score + self.delta:
+            self.counter += 1
+            if self.verbose:
+                print(f'EarlyStopping: EarlyStopping counter: {self.counter} out of {self.patience}')
+            if self.counter >= self.patience:
+                self.early_stop = True
+        else:
+            self.best_score = score
+            self.save_checkpoint(model, weights_path)
+            self.counter = 0
+            if self.verbose:
+                print(f'EarlyStopping: Validation score improved ({self.best_score:.6f} --> {score:.6f}).  Resetting counter to 0.')
+            
+    def save_checkpoint(self, model, weights_path):
+        torch.save(model.state_dict(), weights_path)
+        
 def prepare_data(prot_seqs, smiles, validation_split, batch_size, tokenizer,
                  rank, verbose):
     """Prepares datasets, splits them, and returns the dataloaders."""
@@ -100,6 +132,7 @@ def train_epoch(model, dataloader, criterion, optimizer, tokenizer, vocab_size,
         
         # Compute the loss
         loss = criterion(logits, labels)
+        total_train_loss += loss.item()
         
         # Backward pass and optimization
         fabric.backward(loss)
@@ -110,8 +143,6 @@ def train_epoch(model, dataloader, criterion, optimizer, tokenizer, vocab_size,
         _, preds = torch.max(logits, dim=1)
         total_train_correct += (preds == labels).sum().item()
         total_train_samples += labels.numel()
-
-        total_train_loss += loss.item()
 
     avg_train_loss = total_train_loss / len(dataloader)
     train_acc = total_train_correct / total_train_samples
@@ -210,7 +241,7 @@ def train_model(prot_seqs,
         num_gpus (int, optional): The number of GPUs to use. Defaults to 2.
         verbose (bool, optional): Whether to print model information. Defaults to False.
     """
-    fabric = Fabric(accelerator='cuda', devices=num_gpus, num_nodes=1)
+    fabric = Fabric(accelerator='cuda', devices=num_gpus, num_nodes=1, strategy='ddp')
     fabric.launch()
     fabric.seed_everything(1234)
     rank = fabric.global_rank
@@ -263,34 +294,39 @@ def train_model(prot_seqs,
     # Start the training loop
     print('[Rank %d] Starting the training loop...'%rank)
     best_val_accuracy = 0
-
+    patience = 5
+    delta = 0
+    early_stopping = EarlyStopping(patience=patience, delta=delta, verbose=verbose)
+    
     for epoch in range(num_epochs):
 
         # training
         avg_train_loss, train_acc = train_epoch(model, train_dataloader,
-                                                  criterion, optimizer,
-                                                  tokenizer, vocab_size,
-                                                  teacher_forcing, fabric)
+                                                criterion, optimizer,
+                                                tokenizer, vocab_size,
+                                                teacher_forcing, fabric)
     
         # validation
         avg_val_loss, val_acc = validate_epoch(model, val_dataloader,
-                                                 criterion, tokenizer,
-                                                 vocab_size, fabric)
+                                                criterion, tokenizer,
+                                                vocab_size, fabric)
 
         # Print the metrics
         print(f"[Rank {rank}] Epoch {epoch+1}/{num_epochs}, "\
-              f"Train Loss: {avg_train_loss}, Train Accuracy: {train_acc}, "\
-              f"Validation Loss: {avg_val_loss}, Validation Accuracy: {val_acc}")
+              f"Train Loss: {avg_train_loss:.4f}, Train Accuracy: {train_acc:.4f}, "\
+              f"Validation Loss: {avg_val_loss:.4f}, Validation Accuracy: {val_acc:.4f}")
         
         if get_wandb:
             # log metrics to wandb
             wandb.log({"Epoch": epoch+1, "Train Loss": avg_train_loss, "Train Accuracy": train_acc,
                         "Validation Loss": avg_val_loss, "Validation Accuracy": val_acc})
 
-        # Save the model weights if validation accuracy improves
-        if val_acc > best_val_accuracy:
-            best_val_accuracy = val_acc
-            torch.save(model.state_dict(), weights_path)
+        # Early stopping based on validation loss
+        early_stopping(avg_val_loss, model, weights_path)
+        
+        if early_stopping.early_stop:
+            print(f"[Rank {rank}] Early stopping after {epoch+1} epochs.")
+            break
 
     print('[Rank %d] Training complete!'%rank)
     
@@ -299,6 +335,7 @@ def train_model(prot_seqs,
         torch.cuda.memory._dump_snapshot('memory_snapshot.pickle')
     torch.cuda.memory._record_memory_history(enabled=None)
 
+# UTILITIES
 def parse_args():
     """Parse the command-line arguments."""
     
@@ -341,7 +378,7 @@ def load_config(config_path):
     # Add configuration for wandb if enabled
     if config['get_wandb']:
         config_dict['wandb'] = {
-            'project': config['wandb_project'],
+            'wandb_project': config['wandb_project'],
             'wandb_config': {
                 "learning_rate": config['learning_rate'],
                 "batch_size": config['batch_size'],
