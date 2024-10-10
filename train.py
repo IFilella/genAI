@@ -7,6 +7,7 @@ from utils.dataset import ProtMolDataset, collate_fn
 from utils.earlystopping import EarlyStopping
 from utils.configuration import load_config
 from tokenizer import Tokenizer
+from sklearn.metrics import precision_score, recall_score, f1_score, roc_auc_score
 from lightning.fabric import Fabric
 from torchinfo import summary
 import pandas as pd
@@ -164,8 +165,18 @@ def evaluate_epoch(model, dataloader, criterion, tokenizer, vocab_size, fabric):
 
     avg_val_loss = total_val_loss / len(dataloader)
     val_acc = total_val_correct / total_val_samples
+    
+    # Calculate additional metrics
+    precision = precision_score(labels.cpu(), preds.cpu(),
+                                average='macro', zero_division=0)
+    recall = recall_score(labels.cpu(), preds.cpu(),
+                          average='macro', zero_division=0)
+    f1 = f1_score(labels.cpu(), preds.cpu(),
+                    average='macro', zero_division=0)   
 
-    return avg_val_loss, val_acc
+    other_metrics = {'precision': precision, 'recall': recall, 'f1': f1}
+
+    return avg_val_loss, val_acc, other_metrics
 
 # TRAINING FUNCTION
 def train_model(prot_seqs,
@@ -277,19 +288,28 @@ def train_model(prot_seqs,
                                                 teacher_forcing, fabric)
     
         # validation
-        avg_val_loss, val_acc = evaluate_epoch(model, val_dataloader,
-                                                criterion, tokenizer,
-                                                vocab_size, fabric)
+        avg_val_loss, val_acc, other_metrics = evaluate_epoch(model, val_dataloader,
+                                                              criterion, tokenizer,
+                                                              vocab_size, fabric)
 
         # Print the metrics
         print(f"[Rank {rank}] Epoch {epoch+1}/{num_epochs}, "\
               f"Train Loss: {avg_train_loss:.4f}, Train Accuracy: {train_acc:.4f}, "\
               f"Validation Loss: {avg_val_loss:.4f}, Validation Accuracy: {val_acc:.4f}")
+        
+        if verbose:
+            print(f"[Rank {rank}] Precision: {other_metrics['precision']:.4f}, "\
+                  f"Recall: {other_metrics['recall']:.4f}, F1: {other_metrics['f1']:.4f}")
 
         if get_wandb:
             # log metrics to wandb
-            wandb.log({"Epoch": epoch+1, "Train Loss": avg_train_loss, "Train Accuracy": train_acc,
-                        "Validation Loss": avg_val_loss, "Validation Accuracy": val_acc})
+            wandb.log({"Epoch": epoch+1, "Train Loss": avg_train_loss,
+                       "Train Accuracy": train_acc,
+                       "Validation Loss": avg_val_loss,
+                       "Validation Accuracy": val_acc,
+                       "Validation Precision": other_metrics['precision'],
+                       "Validation Recall": other_metrics['recall'],
+                       "Validation F1": other_metrics['f1']})
 
         # Early stopping based on validation loss
         early_stopping(avg_val_loss, model, weights_path)
