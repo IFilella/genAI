@@ -180,6 +180,8 @@ class Tokenizer:
         
         self.vocab_size = self.prot_tokenizer.vocab_size + self.mol_tokenizer.vocab_size\
                             - len(self.special_tokens) + 1 # +1 for the delimiter token
+        
+        self.build_vocab()
 
     def __call__(self, prots, mols, prot_max_length=600, mol_max_length=80):
         
@@ -205,7 +207,6 @@ class Tokenizer:
         
         # Define delim_token_id based on the protein vocab size
         prot_vocab_size = self.prot_tokenizer.vocab_size
-        self.delim_token_id = prot_vocab_size # not +1 because it is 0-indexed
         delim_input_ids = (torch.tensor([self.delim_token_id] * len(prots))).unsqueeze(1)
         
         # Redefine molecular token_ids to avoid duplicate token_ids between mols and prots
@@ -224,7 +225,10 @@ class Tokenizer:
 
         return {'input_ids': input_tensor, 'attention_mask': attention_mask}
     
-    def decode(self, token_ids, skip_special_tokens=True):
+    def build_vocab(self):
+        
+        self.delim_token_id = self.prot_tokenizer.vocab_size # not +1 because it is 0-indexed
+        
         # update the id2token and token2id mappings
         updated_mol_token2id = {}
         for token, idx in self.mol_tokenizer.token2id.items():
@@ -238,11 +242,14 @@ class Tokenizer:
         # join the protein and the updated delim and molecular id2token mappings
         # Not token2id because the token is the same between the two tokenizers
         delim_id2token = {self.delim_token_id: self.delim_token}
-        decoding_id2token = {**self.prot_tokenizer.id2token,**delim_id2token, **updated_mol_id2token}
+        self.id2token = {**self.prot_tokenizer.id2token,**delim_id2token, **updated_mol_id2token}
+    
+    def decode(self, token_ids, skip_special_tokens=True):
         
+        # Decode the token_ids to the corresponding tokens
         decoded_tokens = []
         for token_id in token_ids:
-            token = decoding_id2token.get(token_id, self.mol_tokenizer.unk_token)
+            token = self.id2token.get(token_id, self.mol_tokenizer.unk_token)
             if skip_special_tokens and token in self.special_tokens:
                 continue
             decoded_tokens.append(token)
