@@ -72,7 +72,7 @@ def generate_square_subsequent_mask(sz):
     return mask
 
 # Create a mask that starts masking after the token with DELIM ID
-def create_partial_mask(sequence, token_id=33):
+def create_partial_mask(sequence, token_id):
     """ Example output with this function:
         tensor([[0., 0., 0., 0., 0., 0., 0., 0., 0., 0.],
                 [0., 0., 0., 0., 0., 0., 0., 0., 0., 0.],
@@ -93,7 +93,7 @@ def create_partial_mask(sequence, token_id=33):
             mask[start_idx:, start_idx:] = generate_square_subsequent_mask(seq_length - start_idx)
     return mask
 
-def create_prefix_decoder_mask(sequence, token_id=33):
+def create_prefix_decoder_mask(sequence, token_id):
     """
     Create an attention mask for a prefix-decoder model.
     - The tokens before the `token_id` (prefix) can only attend to themselves.
@@ -239,8 +239,8 @@ if __name__ == '__main__':
     
     # Initialize the model with `num_layer` layers
     model = MultiLayerTransformerDecoder(vocab_size, d_model, num_heads,
-                                         ff_hidden_layer, dropout, num_layers, fabric)
-    model = fabric.to_device(model)
+                                         ff_hidden_layer, dropout, num_layers)
+    model = fabric.to_device(model, fabric)
 
     output = model(input_tensor, att_mask, tokenizer.delim_token_id)
     print(output.shape)
