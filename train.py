@@ -166,7 +166,9 @@ def train_model(prot_seqs,
                 teacher_forcing=False,
                 validation_split = 0.2,
                 num_gpus=2,
-                verbose=False
+                verbose=False,
+                prot_max_length=600,
+                mol_max_length=80
                 ):
 
     """
@@ -207,7 +209,8 @@ def train_model(prot_seqs,
     # Data preparation
     train_dataloader, val_dataloader = prepare_data(prot_seqs, smiles,
                                                     validation_split, batch_size,
-                                                    tokenizer, rank, verbose)
+                                                    tokenizer, rank, prot_max_length,
+                                                    mol_max_length, verbose)
 
     # Model
     print('[Rank %d] Initializing the model...'%rank)
@@ -256,7 +259,6 @@ def train_model(prot_seqs,
                                                 criterion, optimizer,
                                                 tokenizer, vocab_size,
                                                 teacher_forcing, fabric)
-
         # validation
         avg_val_loss, val_acc, other_metrics = evaluate_epoch(model, val_dataloader,
                                                               criterion, tokenizer,
@@ -331,7 +333,8 @@ def main():
                 config['ff_hidden_layer'], config['dropout'], config['num_layers'],
                 config['loss_function'], config['optimizer'], config['weights_path'],
                 config['get_wandb'], config['teacher_forcing'], config['validation_split'],
-                config['num_gpus'], config['verbose'])
+                config['num_gpus'], config['verbose'], config['prot_max_length'], 
+                config['mol_max_length'])
 
     timef = time.time() - time0
     print('Time taken:', timef)

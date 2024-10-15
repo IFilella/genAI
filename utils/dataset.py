@@ -13,17 +13,19 @@ class ProtMolDataset(Dataset):
         smile = self.smiles[idx]
         return prot_seq, smile
     
-def collate_fn(batch, tokenizer):
+def collate_fn(batch, tokenizer, prot_max_length, mol_max_length):
     # Tokenize the protein sequences and SMILES strings
     prot_seqs = [prot_seq for prot_seq, _ in batch]
     smiles = [smile for _, smile in batch]
-    encoded_texts = tokenizer(prot_seqs, smiles)
+    encoded_texts = tokenizer(prot_seqs, smiles,
+                              prot_max_length=prot_max_length,
+                              mol_max_length=mol_max_length)
     
     return {'input_ids': encoded_texts['input_ids'], 'attention_mask': encoded_texts['attention_mask']}
 
 # DATA PREPARATION
 def prepare_data(prot_seqs, smiles, validation_split, batch_size, tokenizer,
-                 rank, verbose):
+                 rank, prot_max_length, mol_max_length, verbose):
     """Prepares datasets, splits them, and returns the dataloaders."""
 
     print('[Rank %d] Preparing the dataset...'%rank)
@@ -41,11 +43,15 @@ def prepare_data(prot_seqs, smiles, validation_split, batch_size, tokenizer,
     train_dataloader = DataLoader(train_dataset,
                                   batch_size=batch_size,
                                   shuffle=False,
-                                  collate_fn=lambda x: collate_fn(x, tokenizer))
+                                  collate_fn=lambda x: collate_fn(x, tokenizer,
+                                                                  prot_max_length,
+                                                                  mol_max_length))
 
     val_dataloader = DataLoader(val_dataset,
                                 batch_size=batch_size,
                                 shuffle=False,
-                                collate_fn=lambda x: collate_fn(x, tokenizer))
+                                collate_fn=lambda x: collate_fn(x, tokenizer,
+                                                                prot_max_length,
+                                                                mol_max_length))
 
     return train_dataloader, val_dataloader

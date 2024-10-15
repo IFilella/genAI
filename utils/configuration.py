@@ -27,7 +27,9 @@ def load_config(config_path):
         'get_wandb': config['get_wandb'],
         'num_gpus': config['num_gpus'],
         'verbose': config['verbose'],
-        'wandb_project': config['wandb_project']
+        'wandb_project': config['wandb_project'],
+        'prot_max_length': config['prot_max_length'],
+        'mol_max_length': config['mol_max_length']
     }
     
     # Add configuration for wandb if enabled
