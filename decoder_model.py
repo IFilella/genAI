@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
-import time
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -145,7 +144,7 @@ class MultiLayerTransformerDecoder(nn.Module):
             for _ in range(num_layers)
         ])
         self.linear = nn.Linear(d_model, vocab_size)
-        self.softmax = nn.LogSoftmax(dim=-1)
+        #self.softmax = nn.LogSoftmax(dim=-1)
 
     def forward(self, x, padding_mask, delim_tokenidx, fabric):
         x = x.long().clone()
@@ -164,7 +163,7 @@ class MultiLayerTransformerDecoder(nn.Module):
             x = transformer_block(x, padding_mask, target_mask, fabric)
 
         output = self.linear(x)
-        output = self.softmax(output)
+        #output = self.softmax(output)
         return output
 
 
@@ -221,22 +220,26 @@ if __name__ == '__main__':
     num_heads      = 2
     ff_hidden_layer  = 8*d_model
     dropout        = 0.1
-    num_layers     = 4
+    num_layers     = 1
     context_length = 1000
     batch_size     = 1
 
     # Create our input to the model to process
     #input_tensor = torch.randint(0, vocab_size, (context_length, batch_size))
-    input_tensor = fabric.to_device(input_tensor)
-    att_mask = fabric.to_device(att_mask)
     print('Input tensor shape:', input_tensor.shape)
     print('Attention mask shape:', att_mask.shape)
     
     # Initialize the model with `num_layer` layers
     model = MultiLayerTransformerDecoder(vocab_size, d_model, num_heads,
                                          ff_hidden_layer, dropout, num_layers)
-    model = fabric.to_device(model, fabric)
-
-    output = model(input_tensor, att_mask, tokenizer.delim_token_id)
+    model = fabric.to_device(model)
+    
+    output = model(input_tensor, att_mask, tokenizer.delim_token_id, fabric)
     print(output.shape)
-
+    
+    # Model summary
+    summary(model)
+    model_graph = draw_graph(model,
+                             input_data = [input_tensor, att_mask, tokenizer.delim_token_id, fabric],
+                             expand_nested=True)
+    model_graph.visual_graph.render('plots/decoder_model', format='pdf', cleanup=True)
