@@ -1,5 +1,6 @@
 import torch
 from torch.utils.data import Dataset
+from torch.utils.data import DataLoader, random_split
 
 class ProtMolDataset(Dataset):
     def __init__(self, prot_seqs, smiles):
@@ -19,3 +20,32 @@ def collate_fn(batch, tokenizer):
     encoded_texts = tokenizer(prot_seqs, smiles)
     
     return {'input_ids': encoded_texts['input_ids'], 'attention_mask': encoded_texts['attention_mask']}
+
+# DATA PREPARATION
+def prepare_data(prot_seqs, smiles, validation_split, batch_size, tokenizer,
+                 rank, verbose):
+    """Prepares datasets, splits them, and returns the dataloaders."""
+
+    print('[Rank %d] Preparing the dataset...'%rank)
+    dataset = ProtMolDataset(prot_seqs, smiles)
+
+    print('[Rank %d] Splitting the dataset...'%rank)
+    val_size = int(validation_split * len(dataset))
+    train_size = len(dataset) - val_size
+    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+    if verbose:
+        print(f"[Rank {rank}] Train dataset size: {len(train_dataset)}, "\
+              f"Validation dataset size: {len(val_dataset)}")
+
+    print('[Rank %d] Initializing the dataloaders...'%rank)
+    train_dataloader = DataLoader(train_dataset,
+                                  batch_size=batch_size,
+                                  shuffle=False,
+                                  collate_fn=lambda x: collate_fn(x, tokenizer))
+
+    val_dataloader = DataLoader(val_dataset,
+                                batch_size=batch_size,
+                                shuffle=False,
+                                collate_fn=lambda x: collate_fn(x, tokenizer))
+
+    return train_dataloader, val_dataloader
