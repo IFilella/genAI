@@ -168,7 +168,9 @@ def train_model(prot_seqs,
                 num_gpus=2,
                 verbose=False,
                 prot_max_length=600,
-                mol_max_length=80
+                mol_max_length=80,
+                patience=5,
+                delta=0
                 ):
 
     """
@@ -193,6 +195,10 @@ def train_model(prot_seqs,
         validation_split (float, optional): The fraction of the data to use for validation. Defaults to 0.2.
         num_gpus (int, optional): The number of GPUs to use. Defaults to 2.
         verbose (bool, optional): Whether to print model information. Defaults to False.
+        prot_max_length (int, optional): The maximum length of the protein sequences. Defaults to 600.
+        mol_max_length (int, optional): The maximum length of the SMILES strings. Defaults to 80.
+        patience (int, optional): The number of epochs to wait before early stopping. Defaults to 5.
+        delta (int, optional): The minimum change in validation loss to qualify as an improvement. Defaults to 0.
     """
     fabric = Fabric(accelerator='cuda', devices=num_gpus, num_nodes=1, strategy='ddp', precision="bf16-mixed")
     fabric.launch()
@@ -247,11 +253,7 @@ def train_model(prot_seqs,
 
     # Start the training loop
     print('[Rank %d] Starting the training loop...'%rank)
-    best_val_accuracy = 0
-    patience = 5
-    delta = 0
     early_stopping = EarlyStopping(patience=patience, delta=delta, verbose=verbose)
-
     for epoch in range(num_epochs):
 
         # training
@@ -334,7 +336,7 @@ def main():
                 config['loss_function'], config['optimizer'], config['weights_path'],
                 config['get_wandb'], config['teacher_forcing'], config['validation_split'],
                 config['num_gpus'], config['verbose'], config['prot_max_length'], 
-                config['mol_max_length'])
+                config['mol_max_length'], config['es_patience'], config['es_delta'])
 
     timef = time.time() - time0
     print('Time taken:', timef)

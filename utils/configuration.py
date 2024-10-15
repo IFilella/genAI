@@ -29,7 +29,9 @@ def load_config(config_path):
         'verbose': config['verbose'],
         'wandb_project': config['wandb_project'],
         'prot_max_length': config['prot_max_length'],
-        'mol_max_length': config['mol_max_length']
+        'mol_max_length': config['mol_max_length'],
+        'es_patience': config['es_patience'],
+        'es_delta': config['es_delta'],
     }
     
     # Add configuration for wandb if enabled
