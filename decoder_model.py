@@ -87,10 +87,8 @@ def create_partial_mask(sequence, token_id):
 
     seq_length = sequence.size(1)
     mask = torch.zeros(seq_length, seq_length)
-    for i in range(sequence.size(0)):
-        start_idx = (sequence[i] == token_id).nonzero(as_tuple=True)[0][0].item()
-        if start_idx < seq_length:
-            mask[start_idx:, start_idx:] = generate_square_subsequent_mask(seq_length - start_idx)
+    start_idx = (sequence[0] == token_id).nonzero(as_tuple=True)[0][0].item()
+    mask[start_idx:, start_idx:] = generate_square_subsequent_mask(seq_length - start_idx)
     return mask
 
 def create_prefix_decoder_mask(sequence, token_id):
@@ -121,19 +119,16 @@ def create_prefix_decoder_mask(sequence, token_id):
     batch_size, seq_length = sequence.size()
     mask = torch.zeros(seq_length, seq_length)
 
-    # Loop over each sequence in the batch
-    for i in range(batch_size):
-        # Find the index of the prefix token
-        start_idx = (sequence[i] == token_id).nonzero(as_tuple=True)[0][0].item()
+    # Find the index of the prefix token
+    start_idx = (sequence[0] == token_id).nonzero(as_tuple=True)[0][0].item()
 
-        # Apply subsequent mask for the tokens after the prefix
-        if start_idx < seq_length:
-            subsequent_mask = generate_square_subsequent_mask(seq_length - start_idx)
-            mask[start_idx:, start_idx:] = subsequent_mask
+    # Apply subsequent mask for the tokens after the prefix
+    subsequent_mask = generate_square_subsequent_mask(seq_length - start_idx)
+    mask[start_idx:, start_idx:] = subsequent_mask
 
-        # Apply -inf to prevent the prefix (rows 0 to start_idx-1) from attending
-        # to tokens after the prefix (columns start_idx to seq_length-1)
-        mask[:start_idx, start_idx:] = float('-inf')
+    # Apply -inf to prevent the prefix (rows 0 to start_idx-1) from attending
+    # to tokens after the prefix (columns start_idx to seq_length-1)
+    mask[:start_idx, start_idx:] = float('-inf')
 
     return mask
 
