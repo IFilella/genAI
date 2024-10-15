@@ -1,9 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader, random_split
 from decoder_model import MultiLayerTransformerDecoder
-from utils.dataset import ProtMolDataset, collate_fn
+from utils.dataset import prepare_data
 from utils.earlystopping import EarlyStopping
 from utils.configuration import load_config
 from tokenizer import Tokenizer
@@ -16,39 +15,10 @@ import time
 import wandb
 
 
-# DATA PREPARATION
-def prepare_data(prot_seqs, smiles, validation_split, batch_size, tokenizer,
-                 rank, verbose):
-    """Prepares datasets, splits them, and returns the dataloaders."""
-    
-    print('[Rank %d] Preparing the dataset...'%rank)
-    dataset = ProtMolDataset(prot_seqs, smiles)
-
-    print('[Rank %d] Splitting the dataset...'%rank)
-    val_size = int(validation_split * len(dataset))
-    train_size = len(dataset) - val_size
-    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
-    if verbose:
-        print(f"[Rank {rank}] Train dataset size: {len(train_dataset)}, "\
-              f"Validation dataset size: {len(val_dataset)}")
-
-    print('[Rank %d] Initializing the dataloaders...'%rank)
-    train_dataloader = DataLoader(train_dataset,
-                                  batch_size=batch_size,
-                                  shuffle=False,
-                                  collate_fn=lambda x: collate_fn(x, tokenizer))
-
-    val_dataloader = DataLoader(val_dataset,
-                                batch_size=batch_size,
-                                shuffle=False,
-                                collate_fn=lambda x: collate_fn(x, tokenizer))
-
-    return train_dataloader, val_dataloader
-
 def train_epoch(model, dataloader, criterion, optimizer, tokenizer, vocab_size,
                 teacher_forcing, fabric):
     """Train the model for one epoch."""
-    
+
     model.train()
 
     total_train_loss = 0
@@ -56,15 +26,15 @@ def train_epoch(model, dataloader, criterion, optimizer, tokenizer, vocab_size,
     total_train_samples = 0
 
     for i, batch in enumerate(dataloader):
-        
+
         input_tensor = batch['input_ids']
         input_att_mask = batch['attention_mask']
-        
+
         # Generate the shifted input tensor for teacher forcing
         # Apply teacher forcing only after the delimiter token
         batch_size = input_tensor.size(0)
         input_tensor_shifted = input_tensor.clone()
-        
+
         if teacher_forcing:
             for i in range(batch_size):
                 delim_idx = (input_tensor[i] == tokenizer.delim_token_id).nonzero(as_tuple=True)
@@ -79,12 +49,12 @@ def train_epoch(model, dataloader, criterion, optimizer, tokenizer, vocab_size,
             input_tensor = input_tensor_shifted
         else:
             input_tensor = input_tensor
-        
+
         input_tensor = fabric.to_device(input_tensor)
         input_att_mask = fabric.to_device(input_att_mask)
-        
+
         logits = model(input_tensor, input_att_mask, tokenizer.delim_token_id, fabric)
-        
+
         # calculate the loss just for the second part (after the delimiter)
         # mask after the delimiter
         batch_size = input_tensor.size(0)
@@ -95,16 +65,16 @@ def train_epoch(model, dataloader, criterion, optimizer, tokenizer, vocab_size,
                 start_idx = delim_idx[0].item() + 1
                 if start_idx < input_tensor.size(1): # check if there are tokens after the delimiter
                     loss_mask[i, start_idx:] = True
-                
+
         # Apply mask to the logits and labels
         logits = logits.view(batch_size, -1, vocab_size) # [batch_size, seq_len, vocab_size]
         logits = logits[loss_mask] # [num_tokens, vocab_size]
         labels = input_tensor[loss_mask] # [num_tokens]
-        
+
         # Compute the loss
         loss = criterion(logits, labels)
         total_train_loss += loss.item()
-        
+
         # Backward pass and optimization
         fabric.backward(loss)
         optimizer.step()
@@ -122,9 +92,9 @@ def train_epoch(model, dataloader, criterion, optimizer, tokenizer, vocab_size,
 
 def evaluate_epoch(model, dataloader, criterion, tokenizer, vocab_size, fabric):
     """Evaluate the model for one epoch."""
-    
+
     model.eval()
-    
+
     total_val_loss = 0
     total_val_correct = 0
     total_val_samples = 0
@@ -133,10 +103,10 @@ def evaluate_epoch(model, dataloader, criterion, tokenizer, vocab_size, fabric):
         for batch in dataloader:
             input_tensor = batch['input_ids']
             input_att_mask = batch['attention_mask']
-            
+
             input_tensor = fabric.to_device(input_tensor)
             input_att_mask = fabric.to_device(input_att_mask)
-            
+
             logits = model(input_tensor, input_att_mask, tokenizer.delim_token_id, fabric)
 
             # Mask after the delimiter
@@ -148,11 +118,11 @@ def evaluate_epoch(model, dataloader, criterion, tokenizer, vocab_size, fabric):
                     start_idx = delim_idx[0].item() + 1
                     if start_idx < input_tensor.size(1):
                         loss_mask[i, start_idx:] = True
-            
+
             logits = logits.view(batch_size, -1, vocab_size)
             logits = logits[loss_mask]
             labels = input_tensor[loss_mask]
-            
+
             # Compute the loss
             loss = criterion(logits, labels)
 
@@ -165,14 +135,14 @@ def evaluate_epoch(model, dataloader, criterion, tokenizer, vocab_size, fabric):
 
     avg_val_loss = total_val_loss / len(dataloader)
     val_acc = total_val_correct / total_val_samples
-    
+
     # Calculate additional metrics
     precision = precision_score(labels.cpu(), preds.cpu(),
                                 average='macro', zero_division=0)
     recall = recall_score(labels.cpu(), preds.cpu(),
                           average='macro', zero_division=0)
     f1 = f1_score(labels.cpu(), preds.cpu(),
-                    average='macro', zero_division=0)   
+                    average='macro', zero_division=0)
 
     other_metrics = {'precision': precision, 'recall': recall, 'f1': f1}
 
@@ -229,22 +199,22 @@ def train_model(prot_seqs,
 
     # Enable memory tracking
     torch.cuda.memory._record_memory_history(max_entries=100000)
-    
+
     # Tokenizer initialization
     tokenizer = Tokenizer()
     vocab_size = tokenizer.vocab_size
-    
+
     # Data preparation
     train_dataloader, val_dataloader = prepare_data(prot_seqs, smiles,
                                                     validation_split, batch_size,
                                                     tokenizer, rank, verbose)
-    
+
     # Model
     print('[Rank %d] Initializing the model...'%rank)
     model = MultiLayerTransformerDecoder(vocab_size, d_model, num_heads,
                                          ff_hidden_layer, dropout, num_layers)
     model = fabric.to_device(model)
-    
+
     assert model.linear.out_features == vocab_size,\
     f"Expected output layer size {vocab_size}, but got {model.linear.out_features}"
 
@@ -254,7 +224,7 @@ def train_model(prot_seqs,
 
     # TO DO: Add support for other loss functions and optimizers
     # Loss function
-    padding_token_id = tokenizer.mol_tokenizer.token2id['<pad>'] 
+    padding_token_id = tokenizer.mol_tokenizer.token2id['<pad>']
     # Ensure that padding tokens are masked during training to prevent the model from learning to generate them.
     if loss_function == 'crossentropy':
         criterion = nn.CrossEntropyLoss(ignore_index=padding_token_id)
@@ -278,7 +248,7 @@ def train_model(prot_seqs,
     patience = 5
     delta = 0
     early_stopping = EarlyStopping(patience=patience, delta=delta, verbose=verbose)
-    
+
     for epoch in range(num_epochs):
 
         # training
@@ -286,7 +256,7 @@ def train_model(prot_seqs,
                                                 criterion, optimizer,
                                                 tokenizer, vocab_size,
                                                 teacher_forcing, fabric)
-    
+
         # validation
         avg_val_loss, val_acc, other_metrics = evaluate_epoch(model, val_dataloader,
                                                               criterion, tokenizer,
@@ -296,7 +266,7 @@ def train_model(prot_seqs,
         print(f"[Rank {rank}] Epoch {epoch+1}/{num_epochs}, "\
               f"Train Loss: {avg_train_loss:.4f}, Train Accuracy: {train_acc:.4f}, "\
               f"Validation Loss: {avg_val_loss:.4f}, Validation Accuracy: {val_acc:.4f}")
-        
+
         if verbose:
             print(f"[Rank {rank}] Precision: {other_metrics['precision']:.4f}, "\
                   f"Recall: {other_metrics['recall']:.4f}, F1: {other_metrics['f1']:.4f}")
@@ -313,13 +283,13 @@ def train_model(prot_seqs,
 
         # Early stopping based on validation loss
         early_stopping(avg_val_loss, model, weights_path)
-        
+
         if early_stopping.early_stop:
             print(f"[Rank {rank}] Early stopping after {epoch+1} epochs.")
             break
 
     print('[Rank %d] Training complete!'%rank)
-    
+
     # Disable memory tracking
     if verbose:
         torch.cuda.memory._dump_snapshot('memory_snapshot.pickle')
@@ -327,7 +297,7 @@ def train_model(prot_seqs,
 
 def parse_args():
     """Parse the command-line arguments."""
-    
+
     parser = argparse.ArgumentParser(description='Train a Transformer Decoder model')
     parser.add_argument('--config', type=str, default='config.yaml',
                         help='Path to the configuration YAML file with all the parameters',
@@ -362,7 +332,7 @@ def main():
                 config['loss_function'], config['optimizer'], config['weights_path'],
                 config['get_wandb'], config['teacher_forcing'], config['validation_split'],
                 config['num_gpus'], config['verbose'])
-    
+
     timef = time.time() - time0
     print('Time taken:', timef)
 
