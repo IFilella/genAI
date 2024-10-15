@@ -144,7 +144,6 @@ class MultiLayerTransformerDecoder(nn.Module):
             for _ in range(num_layers)
         ])
         self.linear = nn.Linear(d_model, vocab_size)
-        #self.softmax = nn.LogSoftmax(dim=-1)
 
     def forward(self, x, padding_mask, delim_tokenidx, fabric):
         x = x.long().clone()
@@ -163,7 +162,7 @@ class MultiLayerTransformerDecoder(nn.Module):
             x = transformer_block(x, padding_mask, target_mask, fabric)
 
         output = self.linear(x)
-        #output = self.softmax(output)
+
         return output
 
 
