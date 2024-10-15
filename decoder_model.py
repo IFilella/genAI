@@ -157,7 +157,7 @@ class MultiLayerTransformerDecoder(nn.Module):
         x = fabric.to_device(x)
         padding_mask = fabric.to_device(padding_mask)
 
-        target_mask = create_partial_mask(x, delim_tokenidx)
+        target_mask = create_prefix_decoder_mask(x, delim_tokenidx)
 
         x = self.embedding(x)
         x = self.pos_encoder(x, fabric)
