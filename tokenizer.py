@@ -88,11 +88,14 @@ class MolecularTokenizer:
 
     def decode(self, token_ids, skip_special_tokens=False):
         
-        tokens = [self.id2token.get(id, self.unk_token) for id in token_ids]
+        try:
+            tokens = [self.id2token[id] for id in token_ids]
+        except:
+            raise ValueError('tokenid not in MolecularTokenizer vocab')
+        
         if skip_special_tokens:
             tokens = [token for token in tokens if token not in self.special_tokens]
-        else:
-            tokens = [token for token in tokens]
+ 
         return ''.join(tokens)
 
 class ProteinTokenizer():
@@ -161,12 +164,15 @@ class ProteinTokenizer():
         return {'input_ids': input_ids_tensor, 'attention_mask': attention_masks_tensor}
         
     def decode(self, token_ids, skip_special_tokens=False):
-
-        tokens = [self.id2token.get(id, self.unk_token) for id in token_ids]
+        
+        try:
+            tokens = [self.id2token[id] for id in token_ids]
+        except:
+            raise ValueError('tokenid not in ProteinTokenizer vocab')
+        
         if skip_special_tokens:
             tokens = [token for token in tokens if token not in self.special_tokens]
-        else:
-            tokens = [token for token in tokens]
+ 
         return ''.join(tokens)
 
 class Tokenizer:
@@ -246,15 +252,15 @@ class Tokenizer:
     
     def decode(self, token_ids, skip_special_tokens=True):
         
-        # Decode the token_ids to the corresponding tokens
-        decoded_tokens = []
-        for token_id in token_ids:
-            token = self.id2token.get(token_id, self.mol_tokenizer.unk_token)
-            if skip_special_tokens and token in self.special_tokens:
-                continue
-            decoded_tokens.append(token)
-        return ''.join(decoded_tokens)
-    
+        try:
+            tokens = [self.id2token[id] for id in token_ids]
+        except:
+            raise ValueError('tokenid not in Tokenizer vocab')
+        
+        if skip_special_tokens:
+            tokens = [token for token in tokens if token not in self.special_tokens]
+ 
+        return ''.join(tokens) 
 
 if __name__ == '__main__':
     
@@ -283,7 +289,7 @@ if __name__ == '__main__':
     encoded_prots = prot_tokenizer(prot_list, padding=True, truncation=True, max_length=600)
     print(encoded_prots['input_ids'])
     print(prot_tokenizer.vocab_size)
-    print(prot_tokenizer.get_vocab())
+    print(prot_tokenizer.build_vocab())
     """
     
     # Example usage of Tokenizer
