@@ -12,7 +12,7 @@ class ProtMolDataset(Dataset):
         prot_seq = self.prot_seqs[idx]
         smile = self.smiles[idx]
         return prot_seq, smile
-    
+
 def collate_fn(batch, tokenizer, prot_max_length, mol_max_length):
     # Tokenize the protein sequences and SMILES strings
     prot_seqs = [prot_seq for prot_seq, _ in batch]
@@ -20,8 +20,25 @@ def collate_fn(batch, tokenizer, prot_max_length, mol_max_length):
     encoded_texts = tokenizer(prot_seqs, smiles,
                               prot_max_length=prot_max_length,
                               mol_max_length=mol_max_length)
-    
-    return {'input_ids': encoded_texts['input_ids'], 'attention_mask': encoded_texts['attention_mask']}
+
+    input_ids = encoded_texts['input_ids']
+    attention_mask = encoded_texts['attention_mask']
+
+    # teacher forcing by removing last element of input_ids and first element of labels
+    input_ids = encoded_texts['input_ids'][:, :-1]
+    attention_mask = encoded_texts['attention_mask'][:, :-1]
+    labels = encoded_texts['input_ids'][:, 1:]
+
+    # get labels with -100 (ignore_index from loss) to all protein tokenids
+    protein_ids = set(tokenizer.prot_tokenizer.id2token.keys())
+    special_ids = set([tokenizer.prot_tokenizer.cls_token_id,
+                      tokenizer.prot_tokenizer.eos_token_id,
+                      tokenizer.prot_tokenizer.unk_token_id])
+    protein_ids = list(protein_ids - special_ids)
+    protein_ids.append(tokenizer.delim_token_id)
+    labels = torch.where(torch.isin(labels, torch.tensor(protein_ids)), -100, labels)
+
+    return {'input_ids': input_ids, 'attention_mask': attention_mask, 'labels': labels}
 
 # DATA PREPARATION
 def prepare_data(prot_seqs, smiles, validation_split, batch_size, tokenizer,

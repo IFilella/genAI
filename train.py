@@ -29,47 +29,17 @@ def train_epoch(model, dataloader, criterion, optimizer, tokenizer, vocab_size,
 
         input_tensor = batch['input_ids']
         input_att_mask = batch['attention_mask']
+        labels = batch['labels']
 
-        # Generate the shifted input tensor for teacher forcing
-        # Apply teacher forcing only after the delimiter token
         batch_size = input_tensor.size(0)
-        input_tensor_shifted = input_tensor.clone()
-
-        if teacher_forcing:
-            for i in range(batch_size):
-                delim_idx = (input_tensor[i] == tokenizer.delim_token_id).nonzero(as_tuple=True)
-                if len(delim_idx[0]) > 0:
-                    start_idx = delim_idx[0].item() + 1 # start after the delimiter
-                    if start_idx < input_tensor.size(1):
-                        # shift the tokens after the delimiter by 1 position
-                        input_tensor_shifted[i, start_idx:] = torch.roll(input_tensor[i, start_idx:], shifts=1, dims=0)
-                        # the first token after the delimiter should be the padding token
-                        input_tensor_shifted[i, start_idx] = tokenizer.mol_tokenizer.pad_token_id
-                        # It is not necessary to shift the attention mask
-            input_tensor = input_tensor_shifted
-        else:
-            input_tensor = input_tensor
-
-        input_tensor = fabric.to_device(input_tensor)
-        input_att_mask = fabric.to_device(input_att_mask)
 
         logits = model(input_tensor, input_att_mask, tokenizer.delim_token_id, fabric)
 
-        # calculate the loss just for the second part (after the delimiter)
-        # mask after the delimiter
-        batch_size = input_tensor.size(0)
-        loss_mask = torch.zeros_like(input_tensor, dtype=torch.bool)
-        for i in range(batch_size):
-            delim_idx = (input_tensor[i] == tokenizer.delim_token_id).nonzero(as_tuple=True)
-            if len(delim_idx[0]) > 0:
-                start_idx = delim_idx[0].item() + 1
-                if start_idx < input_tensor.size(1): # check if there are tokens after the delimiter
-                    loss_mask[i, start_idx:] = True
+        # Flatten logits first two dimensions (concatenate seqs from batch)
+        logits = logits.contiguous().view(-1, logits.size(-1))
 
-        # Apply mask to the logits and labels
-        logits = logits.view(batch_size, -1, vocab_size) # [batch_size, seq_len, vocab_size]
-        logits = logits[loss_mask] # [num_tokens, vocab_size]
-        labels = input_tensor[loss_mask] # [num_tokens]
+        # Flatten masked_labels dimensions (concatenate seqs from batch)
+        labels = labels.contiguous().view(-1)
 
         # Compute the loss
         loss = criterion(logits, labels)
@@ -236,7 +206,7 @@ def train_model(prot_seqs,
     padding_token_id = tokenizer.mol_tokenizer.token2id['<pad>']
     # Ensure that padding tokens are masked during training to prevent the model from learning to generate them.
     if loss_function == 'crossentropy':
-        criterion = nn.CrossEntropyLoss(ignore_index=padding_token_id)
+        criterion = nn.CrossEntropyLoss(ignore_index=-100)
     else:
         raise ValueError('Invalid loss function. Please use "crossentropy"')
 
@@ -335,7 +305,7 @@ def main():
                 config['ff_hidden_layer'], config['dropout'], config['num_layers'],
                 config['loss_function'], config['optimizer'], config['weights_path'],
                 config['get_wandb'], config['teacher_forcing'], config['validation_split'],
-                config['num_gpus'], config['verbose'], config['prot_max_length'], 
+                config['num_gpus'], config['verbose'], config['prot_max_length'],
                 config['mol_max_length'], config['es_patience'], config['es_delta'])
 
     timef = time.time() - time0
