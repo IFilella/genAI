@@ -2,6 +2,7 @@ import torch
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader, random_split
 
+# DATASET CLASS
 class ProtMolDataset(Dataset):
     def __init__(self, prot_seqs, smiles):
         self.prot_seqs = prot_seqs
@@ -13,6 +14,21 @@ class ProtMolDataset(Dataset):
         smile = self.smiles[idx]
         return prot_seq, smile
 
+# COLLATE FUNCTION WITH TOKENIZER AND TEACHER FORCING IMPLEMENTED
+def filter_sequences_by_unknown_tokens(input_ids, attention_mask, unknown_token_id, threshold=0.2):
+    
+    unknown_token_count = (input_ids == unknown_token_id).sum(dim=1)
+    total_tokens = input_ids.sum(dim=1)
+
+    # the threshold is the ratio of unknown tokens to total tokens
+    unknown_token_ratio = unknown_token_count / total_tokens
+    valid_sequences_mask = unknown_token_ratio < threshold
+    
+    filtered_input_ids = input_ids[valid_sequences_mask]
+    filtered_attention_mask = attention_mask[valid_sequences_mask]
+    
+    return {'input_ids': filtered_input_ids, 'attention_mask': filtered_attention_mask}
+
 def collate_fn(batch, tokenizer, prot_max_length, mol_max_length):
     # Tokenize the protein sequences and SMILES strings
     prot_seqs = [prot_seq for prot_seq, _ in batch]
@@ -21,8 +37,10 @@ def collate_fn(batch, tokenizer, prot_max_length, mol_max_length):
                               prot_max_length=prot_max_length,
                               mol_max_length=mol_max_length)
 
-    input_ids = encoded_texts['input_ids']
-    attention_mask = encoded_texts['attention_mask']
+    encoded_texts = filter_sequences_by_unknown_tokens(encoded_texts['input_ids'],
+                                                       encoded_texts['attention_mask'],
+                                                       tokenizer.prot_tokenizer.unk_token_id,
+                                                       threshold=0.2)
 
     # teacher forcing by removing last element of input_ids and first element of labels
     input_ids = encoded_texts['input_ids'][:, :-1]
