@@ -22,7 +22,6 @@ def load_config(config_path):
         'loss_function': config['loss_function'],
         'optimizer': config['optimizer'],
         'weights_path': config['weights_path'],
-        'teacher_forcing': config['teacher_forcing'],
         'validation_split': config['validation_split'],
         'get_wandb': config['get_wandb'],
         'num_gpus': config['num_gpus'],

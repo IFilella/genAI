@@ -6,7 +6,7 @@ from utils.dataset import prepare_data
 from utils.earlystopping import EarlyStopping
 from utils.configuration import load_config
 from tokenizer import Tokenizer
-from sklearn.metrics import precision_score, recall_score, f1_score, roc_auc_score
+from sklearn.metrics import precision_score, recall_score, f1_score
 from lightning.fabric import Fabric
 from torchinfo import summary
 import pandas as pd
@@ -15,8 +15,7 @@ import time
 import wandb
 
 
-def train_epoch(model, dataloader, criterion, optimizer, tokenizer, vocab_size,
-                teacher_forcing, fabric):
+def train_epoch(model, dataloader, criterion, optimizer, tokenizer, fabric):
     """Train the model for one epoch."""
 
     model.train()
@@ -25,13 +24,11 @@ def train_epoch(model, dataloader, criterion, optimizer, tokenizer, vocab_size,
     total_train_correct = 0
     total_train_samples = 0
 
-    for i, batch in enumerate(dataloader):
+    for batch in dataloader:
 
         input_tensor = batch['input_ids']
         input_att_mask = batch['attention_mask']
         labels = batch['labels']
-
-        batch_size = input_tensor.size(0)
 
         logits = model(input_tensor, input_att_mask, tokenizer.delim_token_id, fabric)
 
@@ -70,38 +67,27 @@ def evaluate_epoch(model, dataloader, criterion, tokenizer, vocab_size, fabric):
     total_val_samples = 0
 
     with torch.no_grad():
+
         for batch in dataloader:
+
             input_tensor = batch['input_ids']
             input_att_mask = batch['attention_mask']
-
-            input_tensor = fabric.to_device(input_tensor)
-            input_att_mask = fabric.to_device(input_att_mask)
+            labels = batch['labels']
 
             logits = model(input_tensor, input_att_mask, tokenizer.delim_token_id, fabric)
 
-            # Mask after the delimiter
-            batch_size = input_tensor.size(0)
-            loss_mask = torch.zeros_like(input_tensor, dtype=torch.bool)
-            for i in range(batch_size):
-                delim_idx = (input_tensor[i] == tokenizer.delim_token_id).nonzero(as_tuple=True)
-                if len(delim_idx[0]) > 0:
-                    start_idx = delim_idx[0].item() + 1
-                    if start_idx < input_tensor.size(1):
-                        loss_mask[i, start_idx:] = True
-
-            logits = logits.view(batch_size, -1, vocab_size)
-            logits = logits[loss_mask]
-            labels = input_tensor[loss_mask]
+            # Flatten logits and labels dimensions (concatenate seqs from batch)
+            logits = logits.contiguous().view(-1, logits.size(-1))
+            labels = labels.contiguous().view(-1)
 
             # Compute the loss
             loss = criterion(logits, labels)
-
+            total_val_loss += loss.item()
+            
             # Calculate the accuracy
             _, preds = torch.max(logits, dim=1)
             total_val_correct += (preds == labels).sum().item()
             total_val_samples += labels.numel()
-
-            total_val_loss += loss.item()
 
     avg_val_loss = total_val_loss / len(dataloader)
     val_acc = total_val_correct / total_val_samples
@@ -133,7 +119,6 @@ def train_model(prot_seqs,
                 optimizer='Adam',
                 weights_path='weights/best_model_weights.pth',
                 get_wandb=False,
-                teacher_forcing=False,
                 validation_split = 0.2,
                 num_gpus=2,
                 verbose=False,
@@ -161,7 +146,6 @@ def train_model(prot_seqs,
         optimizer (str, optional): The optimizer to use. Defaults to 'Adam'.
         weights_path (str, optional): The path to save the model weights. Defaults to 'weights/best_model_weights.pth'.
         get_wandb (bool, optional): Whether to log metrics to wandb. Defaults to False.
-        teacher_forcing (bool, optional): Whether to use teacher forcing. Defaults to False.
         validation_split (float, optional): The fraction of the data to use for validation. Defaults to 0.2.
         num_gpus (int, optional): The number of GPUs to use. Defaults to 2.
         verbose (bool, optional): Whether to print model information. Defaults to False.
@@ -203,8 +187,6 @@ def train_model(prot_seqs,
 
     # TO DO: Add support for other loss functions and optimizers
     # Loss function
-    padding_token_id = tokenizer.mol_tokenizer.token2id['<pad>']
-    # Ensure that padding tokens are masked during training to prevent the model from learning to generate them.
     if loss_function == 'crossentropy':
         criterion = nn.CrossEntropyLoss(ignore_index=-100)
     else:
@@ -229,8 +211,7 @@ def train_model(prot_seqs,
         # training
         avg_train_loss, train_acc = train_epoch(model, train_dataloader,
                                                 criterion, optimizer,
-                                                tokenizer, vocab_size,
-                                                teacher_forcing, fabric)
+                                                tokenizer, fabric)
         # validation
         avg_val_loss, val_acc, other_metrics = evaluate_epoch(model, val_dataloader,
                                                               criterion, tokenizer,
@@ -304,7 +285,7 @@ def main():
                 config['batch_size'], config['d_model'], config['num_heads'],
                 config['ff_hidden_layer'], config['dropout'], config['num_layers'],
                 config['loss_function'], config['optimizer'], config['weights_path'],
-                config['get_wandb'], config['teacher_forcing'], config['validation_split'],
+                config['get_wandb'], config['validation_split'],
                 config['num_gpus'], config['verbose'], config['prot_max_length'],
                 config['mol_max_length'], config['es_patience'], config['es_delta'])
 
