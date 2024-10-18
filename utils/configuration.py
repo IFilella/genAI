@@ -34,21 +34,20 @@ def load_config(config_path):
     }
     
     # Add configuration for wandb if enabled
-    if config['get_wandb']:
-        config_dict['wandb'] = {
-            'wandb_project': config['wandb_project'],
-            'wandb_config': {
-                "learning_rate": config['learning_rate'],
-                "batch_size": config['batch_size'],
-                "num_epochs": config['num_epochs'],
-                "d_model": config['d_model'],
-                "num_heads": config['num_heads'],
-                "ff_hidden_layer": config['ff_hidden_layer'],
-                "dropout": config['dropout'],
-                "num_layers": config['num_layers'],
-                "architecture": "Decoder-only",
-                "dataset": "ChEMBL_BindingDB_sorted_sample10000",
-            }
+    config_dict['wandb'] = {
+        'wandb_project': config['wandb_project'],
+        'wandb_config': {
+            "learning_rate": config['learning_rate'],
+            "batch_size": config['batch_size'],
+            "num_epochs": config['num_epochs'],
+            "d_model": config['d_model'],
+            "num_heads": config['num_heads'],
+            "ff_hidden_layer": config['ff_hidden_layer'],
+            "dropout": config['dropout'],
+            "num_layers": config['num_layers'],
+            "architecture": "Decoder-only",
+            "dataset": "ChEMBL_BindingDB_sorted",
         }
+    }
     
     return config_dict

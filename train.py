@@ -5,6 +5,7 @@ from decoder_model import MultiLayerTransformerDecoder
 from utils.dataset import prepare_data
 from utils.earlystopping import EarlyStopping
 from utils.configuration import load_config
+from utils import memory
 from tokenizer import Tokenizer
 from sklearn.metrics import precision_score, recall_score, f1_score
 from lightning.fabric import Fabric
@@ -119,6 +120,8 @@ def train_model(prot_seqs,
                 optimizer='Adam',
                 weights_path='weights/best_model_weights.pth',
                 get_wandb=False,
+                wandb_project=None,
+                wandb_config=None,
                 validation_split = 0.2,
                 num_gpus=2,
                 verbose=False,
@@ -146,6 +149,8 @@ def train_model(prot_seqs,
         optimizer (str, optional): The optimizer to use. Defaults to 'Adam'.
         weights_path (str, optional): The path to save the model weights. Defaults to 'weights/best_model_weights.pth'.
         get_wandb (bool, optional): Whether to log metrics to wandb. Defaults to False.
+        wandb_project (str, optional): The wandb project name. Defaults to None.
+        wandb_config (dict, optional): The wandb configuration dictionary. Defaults to None.
         validation_split (float, optional): The fraction of the data to use for validation. Defaults to 0.2.
         num_gpus (int, optional): The number of GPUs to use. Defaults to 2.
         verbose (bool, optional): Whether to print model information. Defaults to False.
@@ -158,9 +163,19 @@ def train_model(prot_seqs,
     fabric.launch()
     fabric.seed_everything(1234)
     rank = fabric.global_rank
+    
+    with fabric.device:
+        torch.set_float32_matmul_precision('medium')
+    
+    if get_wandb:
+        if fabric.is_global_zero:
+            wandb.init(
+                project=wandb_project,
+                config=wandb_config
+            )
 
     # Enable memory tracking
-    torch.cuda.memory._record_memory_history(max_entries=100000)
+    # torch.cuda.memory._record_memory_history(max_entries=100000)
 
     # Tokenizer initialization
     tokenizer = Tokenizer()
@@ -169,11 +184,12 @@ def train_model(prot_seqs,
     # Data preparation
     train_dataloader, val_dataloader = prepare_data(prot_seqs, smiles,
                                                     validation_split, batch_size,
-                                                    tokenizer, rank, prot_max_length,
+                                                    tokenizer, fabric, prot_max_length,
                                                     mol_max_length, verbose)
 
     # Model
-    print('[Rank %d] Initializing the model...'%rank)
+    if fabric.is_global_zero:
+        print('Initializing the model...')
     model = MultiLayerTransformerDecoder(vocab_size, d_model, num_heads,
                                          ff_hidden_layer, dropout, num_layers)
     model = fabric.to_device(model)
@@ -183,7 +199,8 @@ def train_model(prot_seqs,
 
     # Print model information
     if verbose:
-        summary(model)
+        if fabric.is_global_zero:
+            summary(model)
 
     # TO DO: Add support for other loss functions and optimizers
     # Loss function
@@ -204,7 +221,8 @@ def train_model(prot_seqs,
     val_dataloader = fabric.setup_dataloaders(val_dataloader)
 
     # Start the training loop
-    print('[Rank %d] Starting the training loop...'%rank)
+    if fabric.is_global_zero:
+        print('Starting the training loop...')
     early_stopping = EarlyStopping(patience=patience, delta=delta, verbose=verbose)
     for epoch in range(num_epochs):
 
@@ -218,37 +236,46 @@ def train_model(prot_seqs,
                                                               vocab_size, fabric)
 
         # Print the metrics
-        print(f"[Rank {rank}] Epoch {epoch+1}/{num_epochs}, "\
-              f"Train Loss: {avg_train_loss:.4f}, Train Accuracy: {train_acc:.4f}, "\
-              f"Validation Loss: {avg_val_loss:.4f}, Validation Accuracy: {val_acc:.4f}")
+        if fabric.is_global_zero:
+            print(f"Epoch {epoch+1}/{num_epochs}, "\
+                f"Train Loss: {avg_train_loss:.4f}, Train Accuracy: {train_acc:.4f}, "\
+                f"Validation Loss: {avg_val_loss:.4f}, Validation Accuracy: {val_acc:.4f}")
 
-        if verbose:
-            print(f"[Rank {rank}] Precision: {other_metrics['precision']:.4f}, "\
-                  f"Recall: {other_metrics['recall']:.4f}, F1: {other_metrics['f1']:.4f}")
+            if verbose:
+                print(f"Precision: {other_metrics['precision']:.4f}, "\
+                    f"Recall: {other_metrics['recall']:.4f}, F1: {other_metrics['f1']:.4f}")
 
-        if get_wandb:
-            # log metrics to wandb
-            wandb.log({"Epoch": epoch+1, "Train Loss": avg_train_loss,
-                       "Train Accuracy": train_acc,
-                       "Validation Loss": avg_val_loss,
-                       "Validation Accuracy": val_acc,
-                       "Validation Precision": other_metrics['precision'],
-                       "Validation Recall": other_metrics['recall'],
-                       "Validation F1": other_metrics['f1']})
+            if get_wandb:
+                # log metrics to wandb
+                wandb.log({"Epoch": epoch+1, "Train Loss": avg_train_loss,
+                        "Train Accuracy": train_acc,
+                        "Validation Loss": avg_val_loss,
+                        "Validation Accuracy": val_acc,
+                        "Validation Precision": other_metrics['precision'],
+                        "Validation Recall": other_metrics['recall'],
+                        "Validation F1": other_metrics['f1']})
 
         # Early stopping based on validation loss
         early_stopping(avg_val_loss, model, weights_path)
 
         if early_stopping.early_stop:
-            print(f"[Rank {rank}] Early stopping after {epoch+1} epochs.")
+            print(f"Early stopping after {epoch+1} epochs.")
             break
+        
+        if verbose:
+            if fabric.global_rank == 0: 
+                memory.get_GPU_memory(device='cuda:0')
+                memory.get_CPU_memory()
+            if fabric.global_rank == 1:
+                memory.get_GPU_memory(device='cuda:1')
 
     print('[Rank %d] Training complete!'%rank)
 
     # Disable memory tracking
-    if verbose:
-        torch.cuda.memory._dump_snapshot('memory_snapshot.pickle')
-    torch.cuda.memory._record_memory_history(enabled=None)
+    # if verbose:
+    #     torch.cuda.memory._dump_snapshot('memory_snapshot.pickle')
+    # torch.cuda.memory._record_memory_history(enabled=None)
+
 
 def parse_args():
     """Parse the command-line arguments."""
@@ -273,21 +300,15 @@ def main():
     prots = df[config['col_prots']].tolist()
     mols = df[config['col_mols']].tolist()
 
-    # Configure wandb if enabled to track the training process
-    if config['get_wandb']:
-        wandb.init(
-            project=config['wandb']['wandb_project'],
-            config=config['wandb']['wandb_config']
-        )
-
     # Train the model
     train_model(prots, mols, config['num_epochs'], config['learning_rate'],
                 config['batch_size'], config['d_model'], config['num_heads'],
                 config['ff_hidden_layer'], config['dropout'], config['num_layers'],
                 config['loss_function'], config['optimizer'], config['weights_path'],
-                config['get_wandb'], config['validation_split'],
-                config['num_gpus'], config['verbose'], config['prot_max_length'],
-                config['mol_max_length'], config['es_patience'], config['es_delta'])
+                config['get_wandb'], config['wandb']['wandb_project'], config['wandb']['wandb_config'],
+                config['validation_split'], config['num_gpus'], config['verbose'],
+                config['prot_max_length'], config['mol_max_length'],
+                config['es_patience'], config['es_delta'])
 
     timef = time.time() - time0
     print('Time taken:', timef)
