@@ -230,16 +230,19 @@ def train_model(prot_seqs,
         avg_train_loss, train_acc = train_epoch(model, train_dataloader,
                                                 criterion, optimizer,
                                                 tokenizer, fabric)
+        avg_train_acc = fabric.all_reduce(train_acc, reduce_op='mean')
+        
         # validation
         avg_val_loss, val_acc, other_metrics = evaluate_epoch(model, val_dataloader,
                                                               criterion, tokenizer,
                                                               vocab_size, fabric)
+        avg_val_acc = fabric.all_reduce(val_acc, reduce_op='mean')
 
         # Print the metrics
         if fabric.is_global_zero:
             print(f"Epoch {epoch+1}/{num_epochs}, "\
-                f"Train Loss: {avg_train_loss:.4f}, Train Accuracy: {train_acc:.4f}, "\
-                f"Validation Loss: {avg_val_loss:.4f}, Validation Accuracy: {val_acc:.4f}")
+                f"Train Loss: {avg_train_loss:.4f}, Train Accuracy: {avg_train_acc:.4f}, "\
+                f"Validation Loss: {avg_val_loss:.4f}, Validation Accuracy: {avg_val_acc:.4f}")
 
             if verbose:
                 print(f"Precision: {other_metrics['precision']:.4f}, "\
@@ -248,9 +251,9 @@ def train_model(prot_seqs,
             if get_wandb:
                 # log metrics to wandb
                 wandb.log({"Epoch": epoch+1, "Train Loss": avg_train_loss,
-                        "Train Accuracy": train_acc,
+                        "Train Accuracy": avg_train_acc,
                         "Validation Loss": avg_val_loss,
-                        "Validation Accuracy": val_acc,
+                        "Validation Accuracy": avg_val_acc,
                         "Validation Precision": other_metrics['precision'],
                         "Validation Recall": other_metrics['recall'],
                         "Validation F1": other_metrics['f1']})
