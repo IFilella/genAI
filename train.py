@@ -164,9 +164,6 @@ def train_model(prot_seqs,
     fabric.seed_everything(1234)
     rank = fabric.global_rank
     
-    with fabric.device:
-        torch.set_float32_matmul_precision('medium')
-    
     if get_wandb:
         if fabric.is_global_zero:
             wandb.init(
@@ -290,6 +287,7 @@ def parse_args():
     return parser.parse_args()
 
 def main():
+    torch.set_float32_matmul_precision('medium')
 
     time0 = time.time()
 
