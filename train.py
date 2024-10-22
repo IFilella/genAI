@@ -26,16 +26,14 @@ def train_epoch(model, dataloader, criterion, optimizer, tokenizer, fabric):
     total_train_samples = 0
 
     for batch in dataloader:
-
         input_tensor = batch['input_ids']
         input_att_mask = batch['attention_mask']
         labels = batch['labels']
-
         logits = model(input_tensor, input_att_mask, tokenizer.delim_token_id, fabric)
-
+        
         # Flatten logits first two dimensions (concatenate seqs from batch)
         logits = logits.contiguous().view(-1, logits.size(-1))
-
+        
         # Flatten masked_labels dimensions (concatenate seqs from batch)
         labels = labels.contiguous().view(-1)
 
@@ -50,7 +48,10 @@ def train_epoch(model, dataloader, criterion, optimizer, tokenizer, fabric):
 
         # Calculate the accuracy
         _, preds = torch.max(logits, dim=1)
-        total_train_correct += (preds == labels).sum().item()
+        mask = (labels != -100)
+        labels_mol = labels[mask]
+        preds_mol = preds[mask]
+        total_train_correct += (preds_mol == labels_mol).sum().item()
         total_train_samples += labels.numel()
 
     avg_train_loss = total_train_loss / len(dataloader)
@@ -227,6 +228,7 @@ def train_model(prot_seqs,
         avg_train_loss, train_acc = train_epoch(model, train_dataloader,
                                                 criterion, optimizer,
                                                 tokenizer, fabric)
+        exit()
         avg_train_acc = fabric.all_reduce(train_acc, reduce_op='mean')
         
         # validation
