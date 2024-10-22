@@ -7,7 +7,7 @@ from utils.earlystopping import EarlyStopping
 from utils.configuration import load_config
 from utils import memory
 from tokenizer import Tokenizer
-from sklearn.metrics import precision_score, recall_score, f1_score
+from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score
 from lightning.fabric import Fabric
 from torchinfo import summary
 import pandas as pd
@@ -65,46 +65,68 @@ def evaluate_epoch(model, dataloader, criterion, tokenizer, vocab_size, fabric):
     model.eval()
 
     total_val_loss = 0
-    total_val_correct = 0
-    total_val_samples = 0
+
+    total_val_predicted = []
+    total_val_labels = []
 
     with torch.no_grad():
 
-        for batch in dataloader:
-
+        for i, batch in enumerate(dataloader):
             input_tensor = batch['input_ids']
-            input_att_mask = batch['attention_mask']
             labels = batch['labels']
 
-            logits = model(input_tensor, input_att_mask, tokenizer.delim_token_id, fabric)
+            pad_id = tokenizer.prot_tokenizer.pad_token_id
 
-            # Flatten logits and labels dimensions (concatenate seqs from batch)
-            logits = logits.contiguous().view(-1, logits.size(-1))
+            # Start autoregressive eval with prot + <del>
+            delim_idx = (input_tensor[0] == tokenizer.delim_token_id).nonzero().item()
+            input_decoder = input_tensor[:, :delim_idx+1]
+            input_decoder = fabric.to_device(input_decoder)
+            predicted = []
+            max_len = input_tensor.shape[1] - delim_idx
+            
+            for _ in range(max_len):
+                input_att_mask = (input_decoder == pad_id)
+                input_att_mask = fabric.to_device(input_att_mask)
+                logits = model(input_decoder, input_att_mask, tokenizer.delim_token_id, fabric)
+                
+                # Get the predicted token from the last step
+                pred_token = logits[:,-1, :].argmax(dim=-1).unsqueeze(1)
+                predicted.append(pred_token)
+                input_decoder = torch.cat((input_decoder, pred_token), dim=1)
+            
+            predicted = torch.cat(predicted, dim=1)
+            logits = logits.view(-1, logits.shape[-1])
+            labels_mol = labels[:, delim_idx:]
             labels = labels.contiguous().view(-1)
-
-            # Compute the loss
+            labels_mol = labels_mol.contiguous().view(-1)
             loss = criterion(logits, labels)
             total_val_loss += loss.item()
+            predicted = predicted.contiguous().view(-1)
+
+
+            total_val_predicted.extend(predicted.cpu().numpy())
+            total_val_labels.extend(labels_mol.cpu().numpy())
+            correct = (predicted == labels_mol).sum().item()
             
-            # Calculate the accuracy
-            _, preds = torch.max(logits, dim=1)
-            total_val_correct += (preds == labels).sum().item()
-            total_val_samples += labels.numel()
 
     avg_val_loss = total_val_loss / len(dataloader)
-    val_acc = total_val_correct / total_val_samples
-
-    # Calculate additional metrics
-    precision = precision_score(labels.cpu(), preds.cpu(),
-                                average='macro', zero_division=0)
-    recall = recall_score(labels.cpu(), preds.cpu(),
-                          average='macro', zero_division=0)
-    f1 = f1_score(labels.cpu(), preds.cpu(),
-                    average='macro', zero_division=0)
-
+    precision = precision_score(total_val_labels,
+                                total_val_predicted,
+                                average='macro',
+                                zero_division=0)
+    recall = recall_score(total_val_labels,
+                          total_val_predicted,
+                          average='macro',
+                          zero_division=0)
+    f1 = f1_score(total_val_labels,
+                  total_val_predicted,
+                  average='macro',
+                  zero_division=0)
+    accuracy = accuracy_score(total_val_labels, total_val_predicted)
+         
     other_metrics = {'precision': precision, 'recall': recall, 'f1': f1}
 
-    return avg_val_loss, val_acc, other_metrics
+    return avg_val_loss, accuracy, other_metrics
 
 # TRAINING FUNCTION
 def train_model(prot_seqs,
@@ -228,7 +250,6 @@ def train_model(prot_seqs,
         avg_train_loss, train_acc = train_epoch(model, train_dataloader,
                                                 criterion, optimizer,
                                                 tokenizer, fabric)
-        exit()
         avg_train_acc = fabric.all_reduce(train_acc, reduce_op='mean')
         
         # validation
