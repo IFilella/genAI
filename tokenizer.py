@@ -184,6 +184,11 @@ class Tokenizer:
         
         self.special_tokens = self.prot_tokenizer.special_tokens
         
+        self.special_token_ids = [self.mol_tokenizer.cls_token_id,
+                                  self.mol_tokenizer.pad_token_id,
+                                  self.mol_tokenizer.eos_token_id,
+                                  self.mol_tokenizer.unk_token_id]
+        
         self.vocab_size = self.prot_tokenizer.vocab_size + self.mol_tokenizer.vocab_size\
                             - len(self.special_tokens) + 1 # +1 for the delimiter token
         
@@ -215,12 +220,8 @@ class Tokenizer:
         prot_vocab_size = self.prot_tokenizer.vocab_size
         delim_input_ids = (torch.tensor([self.delim_token_id] * len(prots))).unsqueeze(1)
         
-        # Redefine molecular token_ids to avoid duplicate token_ids between mols and prots
-        special_token_ids = torch.tensor([self.mol_tokenizer.cls_token_id,
-                                          self.mol_tokenizer.pad_token_id,
-                                          self.mol_tokenizer.eos_token_id,
-                                          self.mol_tokenizer.unk_token_id])
-        mask = ~torch.isin(mols_input_ids, special_token_ids)
+        # Redefine molecular token ids to avoid duplicate token_ids between mols and prots
+        mask = ~torch.isin(mols_input_ids, torch.tensor(self.special_token_ids))
         mols_input_ids[mask] += (prot_vocab_size + 1 - len(self.special_tokens))
         # not +2 because it is 0-indexed and without special tokens
         
@@ -244,11 +245,16 @@ class Tokenizer:
                 updated_mol_token2id[token] = idx
         
         updated_mol_id2token = {idx: token for token, idx in updated_mol_token2id.items()}
-        
+
         # join the protein and the updated delim and molecular id2token mappings
         # Not token2id because the token is the same between the two tokenizers
         delim_id2token = {self.delim_token_id: self.delim_token}
         self.id2token = {**self.prot_tokenizer.id2token,**delim_id2token, **updated_mol_id2token}
+        
+        self.prot_ids = set(self.prot_tokenizer.id2token.keys())
+        self.prot_ids = list(self.prot_ids - set(self.special_token_ids))
+        self.mol_ids = set(updated_mol_id2token.keys())
+        self.mol_ids = list(self.mol_ids - set(self.special_token_ids))
     
     def decode(self, token_ids, skip_special_tokens=True):
         

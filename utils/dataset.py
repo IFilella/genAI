@@ -48,14 +48,9 @@ def collate_fn(batch, tokenizer, prot_max_length, mol_max_length):
     labels = encoded_texts['input_ids'][:, 1:]
 
     # get labels with -100 (ignore_index from loss) to all protein tokenids
-    protein_ids = set(tokenizer.prot_tokenizer.id2token.keys())
-    special_ids = set([tokenizer.prot_tokenizer.cls_token_id,
-                      tokenizer.prot_tokenizer.eos_token_id,
-                      tokenizer.prot_tokenizer.unk_token_id])
-    protein_ids = list(protein_ids - special_ids)
-    protein_ids.append(tokenizer.delim_token_id)
+    protein_ids = tokenizer.prot_ids + [tokenizer.prot_tokenizer.pad_token_id] + [tokenizer.delim_token_id]
     labels = torch.where(torch.isin(labels, torch.tensor(protein_ids)), -100, labels)
-
+    
     return {'input_ids': input_ids, 'attention_mask': attention_mask, 'labels': labels}
 
 # DATA PREPARATION
