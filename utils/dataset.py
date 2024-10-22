@@ -15,13 +15,12 @@ class ProtMolDataset(Dataset):
         return prot_seq, smile
 
 # COLLATE FUNCTION WITH TOKENIZER AND TEACHER FORCING IMPLEMENTED
-def filter_sequences_by_unknown_tokens(input_ids, attention_mask, unknown_token_id, threshold=0.2):
+def filter_sequences_by_unknown_tokens(input_ids, attention_mask, unknown_token_id, pad_token_id, threshold=0.2):
     
     unknown_token_count = (input_ids == unknown_token_id).sum(dim=1)
-    total_tokens = input_ids.sum(dim=1)
-
+    total_token_count = (input_ids != pad_token_id).sum(dim=1)
     # the threshold is the ratio of unknown tokens to total tokens
-    unknown_token_ratio = unknown_token_count / total_tokens
+    unknown_token_ratio = unknown_token_count / total_token_count
     valid_sequences_mask = unknown_token_ratio < threshold
     
     filtered_input_ids = input_ids[valid_sequences_mask]
@@ -40,8 +39,9 @@ def collate_fn(batch, tokenizer, prot_max_length, mol_max_length):
     encoded_texts = filter_sequences_by_unknown_tokens(encoded_texts['input_ids'],
                                                        encoded_texts['attention_mask'],
                                                        tokenizer.prot_tokenizer.unk_token_id,
+                                                       tokenizer.prot_tokenizer.pad_token_id,
                                                        threshold=0.2)
-
+    
     # teacher forcing by removing last element of input_ids and first element of labels
     input_ids = encoded_texts['input_ids'][:, :-1]
     attention_mask = encoded_texts['attention_mask'][:, :-1]
