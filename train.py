@@ -83,6 +83,8 @@ def evaluate_epoch(model, dataloader, criterion, tokenizer, vocab_size, fabric):
             labels = batch['labels']
 
             pad_id = tokenizer.prot_tokenizer.pad_token_id
+            batch_size = labels.shape[0]
+            seq_length = labels.shape[1]
 
             # Start autoregressive eval with prot + <del>
             delim_idx = (input_tensor[0] == tokenizer.delim_token_id).nonzero().item()
@@ -103,20 +105,21 @@ def evaluate_epoch(model, dataloader, criterion, tokenizer, vocab_size, fabric):
             
             # Get loss
             logits = logits.view(-1, logits.shape[-1])
-            _labels = labels.contiguous().view(-1)
-            loss = criterion(logits, _labels)
+            labels = labels.contiguous().view(-1)
+            loss = criterion(logits, labels)
             total_val_loss += loss.item()
             
-            # Get predicted and corresponding labels
+            # Get predicted and corresponding labels (only for molecule)
             predicted = torch.cat(predicted, dim=1)
-            labels_mol = labels[:, delim_idx:]
-            labels_mol[labels_mol==-100] = 1
-            labels_mol = labels_mol.contiguous().view(-1)
+            labels = labels.reshape(batch_size, seq_length)
+            labels = labels[:, delim_idx:]
+            labels[labels==-100] = 1
+            labels = labels.contiguous().view(-1)
             predicted = predicted.contiguous().view(-1)
 
             total_val_predicted.extend(predicted.cpu().numpy())
-            total_val_labels.extend(labels_mol.cpu().numpy())
-            correct = (predicted == labels_mol).sum().item()
+            total_val_labels.extend(labels.cpu().numpy())
+            correct = (predicted == labels).sum().item()
             
 
     avg_val_loss = total_val_loss / len(dataloader)
@@ -287,7 +290,7 @@ def train_model(prot_seqs,
                         "Validation Precision": other_metrics['precision'],
                         "Validation Recall": other_metrics['recall'],
                         "Validation F1": other_metrics['f1']})
-        exit()
+        
         # Early stopping based on validation loss
         early_stopping(avg_val_loss, model, weights_path)
 
