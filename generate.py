@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from decoder_model import MultiLayerTransformerDecoder
-from tokenizer import Tokenizer, ProteinTokenizer
+from tokenizer import Tokenizer, ProteinTokenizer, MolecularTokenizer
 import torch.nn.functional as F
 import pandas as pd
 from lightning.fabric import Fabric
@@ -19,8 +19,13 @@ def generate_smiles(model, sequence, max_length=50, temperature=1.0, verbose=Tru
 
     # Tokenize the protein sequence and add the delimiter token
     prot_tokenizer = ProteinTokenizer()
-    tokenized_prot = prot_tokenizer(sequence)
+    mol_tokenizer = MolecularTokenizer()
+    tokenized_prot = prot_tokenizer(sequence, padding=False, truncation=False)
     prot_ids, prot_att_mask = tokenized_prot['input_ids'], tokenized_prot['attention_mask']
+    
+    # Remove last eos
+    prot_ids = prot_ids[:, :-1]
+    prot_att_mask = prot_att_mask[:, :-1]
     
     tokenizer = Tokenizer()
     delim_id = torch.tensor([tokenizer.delim_token_id]).unsqueeze(0)
@@ -33,36 +38,35 @@ def generate_smiles(model, sequence, max_length=50, temperature=1.0, verbose=Tru
         print('Input tensor shape:', input_tensor.shape)
         print('Attention mask shape:', input_att_mask.shape)
     
-    generated_tokens = []
+    generated_token_ids = []
     with torch.no_grad():
         for _ in range(max_length):
             
             # Predict the next token
             logits = model(input_tensor, input_att_mask, tokenizer.delim_token_id, fabric)
-                        
+            
             next_token_logits = logits[:, -1, :] / temperature
             next_token_probs = F.softmax(next_token_logits, dim=-1)
             next_token_id = torch.multinomial(next_token_probs, num_samples=1).item()
-            
-            # Check if there is any out-of-vocabulary token
-            if next_token_id >= tokenizer.vocab_size:
-                next_token_id = prot_tokenizer.unk_token_id
-            
+             
             # Stop generation if the end token is generated
-            if next_token_id == prot_tokenizer.eos_token_id:
+            if next_token_id == mol_tokenizer.eos_token_id:
                 break
             
             # Append the generated token id to the list
-            generated_tokens.append(next_token_id)
+            generated_token_ids.append(next_token_id)
             next_token_tensor = torch.tensor([[next_token_id]])
             input_tensor = torch.cat([input_tensor, next_token_tensor], dim=1)
-            input_att_mask = torch.cat([input_att_mask, torch.tensor([[0]])], dim=1)
+            if next_token_id == mol_tokenizer.pad_token_id:
+                input_att_mask = torch.cat([input_att_mask, torch.tensor([[1]])], dim=1)
+            else:
+                input_att_mask = torch.cat([input_att_mask, torch.tensor([[0]])], dim=1)
 
     # Decode the generated token ids
     if verbose:
-        print('Generated tokens:', generated_tokens)
+        print('Generated tokens:', generated_token_ids)
         
-    return tokenizer.decode(generated_tokens, skip_special_tokens=True)
+    return tokenizer.decode(generated_token_ids, skip_special_tokens=True)
 
 def generate(quantity, sequence, max_length=50, temperature=1.0, verbose=False):
     for i in range(quantity):
@@ -81,8 +85,8 @@ if __name__ == '__main__':
     num_heads      = 8
     ff_hidden_layer  = 4*d_model
     dropout        = 0.1
-    num_layers     = 2
-    batch_size     = 32
+    num_layers     = 4
+    batch_size     = 10
     num_epochs     = 10
     learning_rate  = 0.0001
     weights_path   = 'weights/best_model_weights.pth'
@@ -97,15 +101,16 @@ if __name__ == '__main__':
     # Load the model weights
     print('Loading model weights...')
     state_dict = torch.load(weights_path, map_location='cuda')
-    model.load_state_dict(state_dict, strict=False)
+    model.load_state_dict(state_dict)
 
     # Generate SMILES strings using the trained model given a protein sequence
     print('Generating SMILES strings...')
     sequence = 'MEQPQEEAPEVREEEEKEEVAEAEGAPELNGGPQHALPSSSYTDLSRSSSPPSLLDQLQMGCDGASCGSLNMECRVCGDKASGFHYGVHACEGCKGFFRRTIRMKLEYEKCERSCKIQKKNRNKCQYCRFQKCLALGMSHNAIRFGRMPEAEKRKLVAGLTANEGSQYNPQVADLKAFSKHIYNAYLKNFNMTKKKARSILTGKASHTAPFVIHDIETLWQAEKGLVWKQLVNGLPPYKEISVHVFYRCQCTTVETVRELTEFAKSIPSFSSLFLNDQVTLLKYGVHEAIFAMLASIVNKDGLLVANGSGFVTREFLRSLRKPFSDIIEPKFEFAVKFNALELDDSDLALFIAAIILCGDRPGLMNVPRVEAIQDTILRALEFHLQANHPDAQYLFPKLLQKMADLRQLVTEHAQMMQRIKKTETETSLHPLLQEIYKDMY'
     print(len(sequence))
     
-    generated_smiles = generate_smiles(model, sequence, max_length=100, temperature=1.0)
-    print(generated_smiles)
+    smile = generate_smiles(model, sequence, max_length=200, temperature=1.0)
+    print(smile)
+    print(len(smile))
     
     some_generated_smiles = generate(10, sequence, max_length=100, 
                                      temperature=1.0, verbose=False)
