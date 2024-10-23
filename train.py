@@ -31,12 +31,15 @@ def train_epoch(model, dataloader, criterion, optimizer, tokenizer, fabric):
         labels = batch['labels']
         logits = model(input_tensor, input_att_mask, tokenizer.delim_token_id, fabric)
         
+        batch_size = labels.shape[0]
+        seq_length = labels.shape[1]
+
         # Flatten logits first two dimensions (concatenate seqs from batch)
         logits = logits.contiguous().view(-1, logits.size(-1))
         
         # Flatten masked_labels dimensions (concatenate seqs from batch)
         labels = labels.contiguous().view(-1)
-
+        
         # Compute the loss
         loss = criterion(logits, labels)
         total_train_loss += loss.item()
@@ -46,17 +49,21 @@ def train_epoch(model, dataloader, criterion, optimizer, tokenizer, fabric):
         optimizer.step()
         optimizer.zero_grad(set_to_none=True) # set_to_none=True to save memory
 
-        # Calculate the accuracy
+        # Accuracy computed only on predicted mol tokens (inlcuding pads)
+        delim_idx = (input_tensor[0] == tokenizer.delim_token_id).nonzero().item()
         _, preds = torch.max(logits, dim=1)
-        mask = (labels != -100)
-        labels_mol = labels[mask]
-        preds_mol = preds[mask]
-        total_train_correct += (preds_mol == labels_mol).sum().item()
+        preds = preds.reshape(batch_size, seq_length)
+        preds = preds[:, delim_idx:]
+        labels = labels.reshape(batch_size, seq_length)
+        labels = labels[:, delim_idx:]
+        labels[labels==-100] = 1
+        
+        total_train_correct += (preds == labels).sum().item()
         total_train_samples += labels.numel()
 
     avg_train_loss = total_train_loss / len(dataloader)
     train_acc = total_train_correct / total_train_samples
-
+    
     return avg_train_loss, train_acc
 
 def evaluate_epoch(model, dataloader, criterion, tokenizer, vocab_size, fabric):
