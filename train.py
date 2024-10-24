@@ -5,6 +5,7 @@ from decoder_model import MultiLayerTransformerDecoder
 from utils.dataset import prepare_data
 from utils.earlystopping import EarlyStopping
 from utils.configuration import load_config
+from utils.timer import Timer
 from utils import memory
 from tokenizer import Tokenizer
 from sklearn.metrics import precision_score, recall_score, f1_score, accuracy_score
@@ -258,19 +259,37 @@ def train_model(prot_seqs,
         print('Starting the training loop...')
     early_stopping = EarlyStopping(patience=patience, delta=delta, verbose=verbose)
     for epoch in range(num_epochs):
+        
+        if verbose and fabric.is_global_zero:
+            timer_epoch = Timer(autoreset=True)
+            timer_epoch.start('Epoch %d/%d'%(epoch+1, num_epochs))
 
         # training
+        if verbose and fabric.is_global_zero:
+            timer_train = Timer(autoreset=True)
+            timer_train.start('Train Epoch %d/%d'%(epoch+1, num_epochs))
+        
         avg_train_loss, train_acc = train_epoch(model, train_dataloader,
                                                 criterion, optimizer,
                                                 tokenizer, fabric)
         avg_train_acc = fabric.all_reduce(train_acc, reduce_op='mean')
         
+        if verbose and fabric.is_global_zero:
+            timer_train.stop()
+        
         # validation
+        if verbose and fabric.is_global_zero:
+            timer_val = Timer(autoreset=True)
+            timer_val.start('Validation Epoch %d/%d'%(epoch+1, num_epochs))
+        
         avg_val_loss, val_acc, other_metrics = evaluate_epoch(model, val_dataloader,
                                                               criterion, tokenizer,
                                                               vocab_size, fabric)
         avg_val_acc = fabric.all_reduce(val_acc, reduce_op='mean')
-
+        
+        if verbose and fabric.is_global_zero:
+            timer_val.stop()
+        
         # Print the metrics
         if fabric.is_global_zero:
             print(f"Epoch {epoch+1}/{num_epochs}, "\
@@ -297,6 +316,9 @@ def train_model(prot_seqs,
         if early_stopping.early_stop:
             print(f"Early stopping after {epoch+1} epochs.")
             break
+        
+        if verbose and fabric.is_global_zero:
+            timer_epoch.stop()
         
         if verbose:
             if fabric.global_rank == 0: 
@@ -325,7 +347,8 @@ def parse_args():
 def main():
     torch.set_float32_matmul_precision('medium')
 
-    time0 = time.time()
+    timer_total = Timer(autoreset=True)
+    timer_total.start('Total time')
 
     args = parse_args()
 
@@ -347,8 +370,7 @@ def main():
                 config['prot_max_length'], config['mol_max_length'],
                 config['es_patience'], config['es_delta'])
 
-    timef = time.time() - time0
-    print('Time taken:', timef)
+    timer_total.stop()
 
 
 if __name__ == '__main__':
