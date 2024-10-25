@@ -58,21 +58,20 @@ def prepare_data(prot_seqs, smiles, validation_split, batch_size, tokenizer,
                  fabric, prot_max_length, mol_max_length, verbose):
     """Prepares datasets, splits them, and returns the dataloaders."""
     
-    if fabric.is_global_zero:
+    if verbose >=0 and fabric.is_global_zero:
         print('Preparing the dataset...')
     dataset = ProtMolDataset(prot_seqs, smiles)
 
-    if fabric.is_global_zero:
+    if verbose >=0 and fabric.is_global_zero:
         print('Splitting the dataset...')
     val_size = int(validation_split * len(dataset))
     train_size = len(dataset) - val_size
     train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
-    if verbose:
-        if fabric.is_global_zero:
+    if verbose >=1 and fabric.is_global_zero:
             print(f"Train dataset size: {len(train_dataset)}, "\
                   f"Validation dataset size: {len(val_dataset)}")
 
-    if fabric.is_global_zero:
+    if verbose >=0 and fabric.is_global_zero:
         print('Initializing the dataloaders...')
     train_dataloader = DataLoader(train_dataset,
                                   batch_size=batch_size,

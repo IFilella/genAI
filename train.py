@@ -67,7 +67,7 @@ def train_epoch(model, dataloader, criterion, optimizer, tokenizer, fabric):
     
     return avg_train_loss, train_acc
 
-def evaluate_epoch(model, dataloader, criterion, tokenizer, vocab_size, fabric):
+def evaluate_epoch(model, dataloader, criterion, tokenizer, fabric):
     """Evaluate the model for one epoch."""
 
     model.eval()
@@ -122,7 +122,6 @@ def evaluate_epoch(model, dataloader, criterion, tokenizer, vocab_size, fabric):
             total_val_labels.extend(labels.cpu().numpy())
             correct = (predicted == labels).sum().item()
             
-
     avg_val_loss = total_val_loss / len(dataloader)
     precision = precision_score(total_val_labels,
                                 total_val_predicted,
@@ -137,7 +136,7 @@ def evaluate_epoch(model, dataloader, criterion, tokenizer, vocab_size, fabric):
                   average='macro',
                   zero_division=0)
     accuracy = accuracy_score(total_val_labels, total_val_predicted)
-         
+
     other_metrics = {'precision': precision, 'recall': recall, 'f1': f1}
 
     return avg_val_loss, accuracy, other_metrics
@@ -190,7 +189,7 @@ def train_model(prot_seqs,
         wandb_config (dict, optional): The wandb configuration dictionary. Defaults to None.
         validation_split (float, optional): The fraction of the data to use for validation. Defaults to 0.2.
         num_gpus (int, optional): The number of GPUs to use. Defaults to 2.
-        verbose (bool, optional): Whether to print model information. Defaults to False.
+        verbose (int, optional): Different levels of verbosity (0, 1, or 2). Defaults to 0. 
         prot_max_length (int, optional): The maximum length of the protein sequences. Defaults to 600.
         mol_max_length (int, optional): The maximum length of the SMILES strings. Defaults to 80.
         patience (int, optional): The number of epochs to wait before early stopping. Defaults to 5.
@@ -201,8 +200,7 @@ def train_model(prot_seqs,
     fabric.seed_everything(1234)
     rank = fabric.global_rank
     
-    if get_wandb:
-        if fabric.is_global_zero:
+    if get_wandb and fabric.is_global_zero:
             wandb.init(
                 project=wandb_project,
                 config=wandb_config
@@ -222,7 +220,7 @@ def train_model(prot_seqs,
                                                     mol_max_length, verbose)
 
     # Model
-    if fabric.is_global_zero:
+    if verbose >=0 and fabric.is_global_zero:
         print('Initializing the model...')
     model = MultiLayerTransformerDecoder(vocab_size, d_model, num_heads,
                                          ff_hidden_layer, dropout, num_layers)
@@ -232,8 +230,7 @@ def train_model(prot_seqs,
     f"Expected output layer size {vocab_size}, but got {model.linear.out_features}"
 
     # Print model information
-    if verbose:
-        if fabric.is_global_zero:
+    if verbose >=1 and fabric.is_global_zero:
             summary(model)
 
     # TO DO: Add support for other loss functions and optimizers
@@ -255,17 +252,17 @@ def train_model(prot_seqs,
     val_dataloader = fabric.setup_dataloaders(val_dataloader)
 
     # Start the training loop
-    if fabric.is_global_zero:
+    if verbose >=0 and fabric.is_global_zero:
         print('Starting the training loop...')
     early_stopping = EarlyStopping(patience=patience, delta=delta, verbose=verbose)
     for epoch in range(num_epochs):
         
-        if verbose and fabric.is_global_zero:
+        if verbose >=2 and fabric.is_global_zero:
             timer_epoch = Timer(autoreset=True)
             timer_epoch.start('Epoch %d/%d'%(epoch+1, num_epochs))
 
         # training
-        if verbose and fabric.is_global_zero:
+        if verbose >=2 and fabric.is_global_zero:
             timer_train = Timer(autoreset=True)
             timer_train.start('Train Epoch %d/%d'%(epoch+1, num_epochs))
         
@@ -274,29 +271,29 @@ def train_model(prot_seqs,
                                                 tokenizer, fabric)
         avg_train_acc = fabric.all_reduce(train_acc, reduce_op='mean')
         
-        if verbose and fabric.is_global_zero:
+        if verbose >=2 and fabric.is_global_zero:
             timer_train.stop()
         
         # validation
-        if verbose and fabric.is_global_zero:
+        if verbose >=2 and fabric.is_global_zero:
             timer_val = Timer(autoreset=True)
             timer_val.start('Validation Epoch %d/%d'%(epoch+1, num_epochs))
         
         avg_val_loss, val_acc, other_metrics = evaluate_epoch(model, val_dataloader,
                                                               criterion, tokenizer,
-                                                              vocab_size, fabric)
+                                                              fabric)
         avg_val_acc = fabric.all_reduce(val_acc, reduce_op='mean')
         
-        if verbose and fabric.is_global_zero:
+        if verbose >=2 and fabric.is_global_zero:
             timer_val.stop()
         
         # Print the metrics
-        if fabric.is_global_zero:
+        if verbose >=1 and fabric.is_global_zero:
             print(f"Epoch {epoch+1}/{num_epochs}, "\
                 f"Train Loss: {avg_train_loss:.4f}, Train Accuracy: {avg_train_acc:.4f}, "\
                 f"Validation Loss: {avg_val_loss:.4f}, Validation Accuracy: {avg_val_acc:.4f}")
 
-            if verbose:
+            if verbose >=1:
                 print(f"Precision: {other_metrics['precision']:.4f}, "\
                     f"Recall: {other_metrics['recall']:.4f}, F1: {other_metrics['f1']:.4f}")
 
@@ -311,23 +308,25 @@ def train_model(prot_seqs,
                         "Validation F1": other_metrics['f1']})
         
         # Early stopping based on validation loss
-        early_stopping(avg_val_loss, model, weights_path)
+        early_stopping(avg_val_loss, model, weights_path, fabric)
 
         if early_stopping.early_stop:
-            print(f"Early stopping after {epoch+1} epochs.")
+            if verbose >=0 and fabric.is_global_zero:
+                print(f"Early stopping after {epoch+1} epochs.")
             break
         
-        if verbose and fabric.is_global_zero:
+        if verbose >=2 and fabric.is_global_zero:
             timer_epoch.stop()
         
-        if verbose:
+        if verbose >=2:
             if fabric.global_rank == 0: 
                 memory.get_GPU_memory(device='cuda:0')
                 memory.get_CPU_memory()
             if fabric.global_rank == 1:
                 memory.get_GPU_memory(device='cuda:1')
 
-    print('[Rank %d] Training complete!'%rank)
+    if verbose >=0 and fabric.is_global_zero:
+        print('Training complete!')
 
     # Disable memory tracking
     # if verbose:
