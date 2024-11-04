@@ -13,9 +13,13 @@ from lightning.fabric import Fabric
 from torchinfo import summary
 import pandas as pd
 import argparse
-import time
 import wandb
 
+def set_seed(seed):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 def train_epoch(model, dataloader, criterion, optimizer, tokenizer, fabric):
     """Train the model for one epoch."""
@@ -26,10 +30,11 @@ def train_epoch(model, dataloader, criterion, optimizer, tokenizer, fabric):
     total_train_correct = 0
     total_train_samples = 0
 
-    for batch in dataloader:
+    for i, batch in enumerate(dataloader):
         input_tensor = batch['input_ids']
         input_att_mask = batch['attention_mask']
         labels = batch['labels']
+
         logits = model(input_tensor, input_att_mask, tokenizer.delim_token_id, fabric)
         
         batch_size = labels.shape[0]
@@ -197,7 +202,7 @@ def train_model(prot_seqs,
     """
     fabric = Fabric(accelerator='cuda', devices=num_gpus, num_nodes=1, strategy='ddp', precision="bf16-mixed")
     fabric.launch()
-    fabric.seed_everything(1234)
+    fabric.seed_everything(1234, workers=True)
     rank = fabric.global_rank
     
     if get_wandb and fabric.is_global_zero:
@@ -248,13 +253,14 @@ def train_model(prot_seqs,
 
     # Distribute the model using Fabric
     model, optimizer = fabric.setup(model, optimizer)
-    train_dataloader = fabric.setup_dataloaders(train_dataloader)
-    val_dataloader = fabric.setup_dataloaders(val_dataloader)
+    train_dataloader = fabric.setup_dataloaders(train_dataloader, use_distributed_sampler=False)
+    val_dataloader = fabric.setup_dataloaders(val_dataloader, use_distributed_sampler=False)
 
     # Start the training loop
     if verbose >=0 and fabric.is_global_zero:
         print('Starting the training loop...')
     early_stopping = EarlyStopping(patience=patience, delta=delta, verbose=verbose)
+
     for epoch in range(num_epochs):
         
         if verbose >=2 and fabric.is_global_zero:
@@ -345,7 +351,8 @@ def parse_args():
 
 def main():
     torch.set_float32_matmul_precision('medium')
-
+    set_seed(1234)
+    
     timer_total = Timer(autoreset=True)
     timer_total.start('Total time')
 
@@ -355,7 +362,6 @@ def main():
 
     # Get the data (in this case, it is sampled for testing purposes)
     df = pd.read_csv(config['data_path'])
-    df = df.sample(1000)
     prots = df[config['col_prots']].tolist()
     mols = df[config['col_mols']].tolist()
 
