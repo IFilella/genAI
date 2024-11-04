@@ -1,6 +1,7 @@
 import torch
-from torch.utils.data import Dataset
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import Dataset, DataLoader, Subset
+from torch.utils.data.distributed import DistributedSampler
+import random
 
 # DATASET CLASS
 class ProtMolDataset(Dataset):
@@ -53,6 +54,27 @@ def collate_fn(batch, tokenizer, prot_max_length, mol_max_length):
     
     return {'input_ids': input_ids, 'attention_mask': attention_mask, 'labels': labels}
 
+# Custom function to randomly split but keep original order in each subset
+def ordered_random_split(dataset, split_ratio=0.8, seed=0):
+    random.seed(seed)
+    total_size = len(dataset)
+    
+    train_size = int(total_size * split_ratio)
+    test_size = total_size - train_size
+    
+    indices = list(range(total_size))
+    random.shuffle(indices)
+    
+    # Split random indices into train and test and sort them to keep order
+    train_indices = sorted(indices[:train_size])
+    test_indices = sorted(indices[train_size:])
+    
+    # Create Subsets using sorted indices
+    train_dataset = Subset(dataset, train_indices)
+    test_dataset = Subset(dataset, test_indices)
+    
+    return train_dataset, test_dataset
+
 # DATA PREPARATION
 def prepare_data(prot_seqs, smiles, validation_split, batch_size, tokenizer,
                  fabric, prot_max_length, mol_max_length, verbose):
@@ -64,25 +86,30 @@ def prepare_data(prot_seqs, smiles, validation_split, batch_size, tokenizer,
 
     if verbose >=0 and fabric.is_global_zero:
         print('Splitting the dataset...')
-    val_size = int(validation_split * len(dataset))
-    train_size = len(dataset) - val_size
-    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+
+    train_dataset, val_dataset = ordered_random_split(dataset, split_ratio=validation_split, seed=0)
+    
     if verbose >=1 and fabric.is_global_zero:
             print(f"Train dataset size: {len(train_dataset)}, "\
                   f"Validation dataset size: {len(val_dataset)}")
 
     if verbose >=0 and fabric.is_global_zero:
         print('Initializing the dataloaders...')
+    
+    sampler_train = DistributedSampler(train_dataset, shuffle=False)
     train_dataloader = DataLoader(train_dataset,
                                   batch_size=batch_size,
                                   shuffle=False,
+                                  sampler=sampler_train,
                                   collate_fn=lambda x: collate_fn(x, tokenizer,
                                                                   prot_max_length,
                                                                   mol_max_length))
-
+    
+    sampler_val = DistributedSampler(val_dataset, shuffle=False)
     val_dataloader = DataLoader(val_dataset,
                                 batch_size=batch_size,
                                 shuffle=False,
+                                sampler=sampler_val,
                                 collate_fn=lambda x: collate_fn(x, tokenizer,
                                                                 prot_max_length,
                                                                 mol_max_length))
