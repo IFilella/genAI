@@ -80,21 +80,21 @@ def prepare_data(prot_seqs, smiles, validation_split, batch_size, tokenizer,
                  fabric, prot_max_length, mol_max_length, verbose):
     """Prepares datasets, splits them, and returns the dataloaders."""
     
-    if verbose >=0 and fabric.is_global_zero:
-        print('Preparing the dataset...')
+    if verbose >=0:
+        fabric.print('Preparing the dataset...')
     dataset = ProtMolDataset(prot_seqs, smiles)
 
-    if verbose >=0 and fabric.is_global_zero:
-        print('Splitting the dataset...')
+    if verbose >=0:
+        fabric.print('Splitting the dataset...')
 
     train_dataset, val_dataset = ordered_random_split(dataset, split_ratio=validation_split, seed=0)
     
-    if verbose >=1 and fabric.is_global_zero:
-            print(f"Train dataset size: {len(train_dataset)}, "\
-                  f"Validation dataset size: {len(val_dataset)}")
+    if verbose >=1:
+        fabric.print(f"Train dataset size: {len(train_dataset)}, "\
+                    f"Validation dataset size: {len(val_dataset)}")
 
-    if verbose >=0 and fabric.is_global_zero:
-        print('Initializing the dataloaders...')
+    if verbose >=0:
+        fabric.print('Initializing the dataloaders...')
     
     sampler_train = DistributedSampler(train_dataset, shuffle=False)
     train_dataloader = DataLoader(train_dataset,

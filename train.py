@@ -203,16 +203,12 @@ def train_model(prot_seqs,
     fabric = Fabric(accelerator='cuda', devices=num_gpus, num_nodes=1, strategy='ddp', precision="bf16-mixed")
     fabric.launch()
     fabric.seed_everything(1234, workers=True)
-    rank = fabric.global_rank
-    
-    if get_wandb and fabric.is_global_zero:
-            wandb.init(
-                project=wandb_project,
-                config=wandb_config
-            )
 
-    # Enable memory tracking
-    # torch.cuda.memory._record_memory_history(max_entries=100000)
+    if get_wandb and fabric.is_global_zero:
+        wandb.init(
+            project=wandb_project,
+            config=wandb_config
+        )
 
     # Tokenizer initialization
     tokenizer = Tokenizer()
@@ -225,8 +221,9 @@ def train_model(prot_seqs,
                                                     mol_max_length, verbose)
 
     # Model
-    if verbose >=0 and fabric.is_global_zero:
-        print('Initializing the model...')
+    if verbose >=0:
+        fabric.print('Initializing the model...')
+        
     model = MultiLayerTransformerDecoder(vocab_size, d_model, num_heads,
                                          ff_hidden_layer, dropout, num_layers)
     model = fabric.to_device(model)
@@ -236,7 +233,7 @@ def train_model(prot_seqs,
 
     # Print model information
     if verbose >=1 and fabric.is_global_zero:
-            summary(model)
+        summary(model)
 
     # TO DO: Add support for other loss functions and optimizers
     # Loss function
@@ -257,8 +254,8 @@ def train_model(prot_seqs,
     val_dataloader = fabric.setup_dataloaders(val_dataloader, use_distributed_sampler=False)
 
     # Start the training loop
-    if verbose >=0 and fabric.is_global_zero:
-        print('Starting the training loop...')
+    if verbose >=0:
+        fabric.print('Starting the training loop...')
     early_stopping = EarlyStopping(patience=patience, delta=delta, verbose=verbose)
 
     for epoch in range(num_epochs):
@@ -294,14 +291,14 @@ def train_model(prot_seqs,
             timer_val.stop()
         
         # Print the metrics
-        if verbose >=1 and fabric.is_global_zero:
-            print(f"Epoch {epoch+1}/{num_epochs}, "\
-                f"Train Loss: {avg_train_loss:.4f}, Train Accuracy: {avg_train_acc:.4f}, "\
-                f"Validation Loss: {avg_val_loss:.4f}, Validation Accuracy: {avg_val_acc:.4f}")
+        if verbose >=1:
+            fabric.print(f"Epoch {epoch+1}/{num_epochs}, "\
+                        f"Train Loss: {avg_train_loss:.4f}, Train Accuracy: {avg_train_acc:.4f}, "\
+                        f"Validation Loss: {avg_val_loss:.4f}, Validation Accuracy: {avg_val_acc:.4f}")
 
             if verbose >=1:
-                print(f"Precision: {other_metrics['precision']:.4f}, "\
-                    f"Recall: {other_metrics['recall']:.4f}, F1: {other_metrics['f1']:.4f}")
+                fabric.print(f"Precision: {other_metrics['precision']:.4f}, "\
+                            f"Recall: {other_metrics['recall']:.4f}, F1: {other_metrics['f1']:.4f}")
 
             if get_wandb:
                 # log metrics to wandb
@@ -317,27 +314,22 @@ def train_model(prot_seqs,
         early_stopping(avg_val_loss, model, weights_path, fabric)
 
         if early_stopping.early_stop:
-            if verbose >=0 and fabric.is_global_zero:
-                print(f"Early stopping after {epoch+1} epochs.")
+            if verbose >=0:
+                fabric.print(f"Early stopping after {epoch+1} epochs.")
             break
         
         if verbose >=2 and fabric.is_global_zero:
             timer_epoch.stop()
         
         if verbose >=2:
-            if fabric.global_rank == 0: 
-                memory.get_GPU_memory(device='cuda:0')
-                memory.get_CPU_memory()
-            if fabric.global_rank == 1:
-                memory.get_GPU_memory(device='cuda:1')
-
-    if verbose >=0 and fabric.is_global_zero:
-        print('Training complete!')
-
-    # Disable memory tracking
-    # if verbose:
-    #     torch.cuda.memory._dump_snapshot('memory_snapshot.pickle')
-    # torch.cuda.memory._record_memory_history(enabled=None)
+            for rank in range(fabric.world_size):
+                if fabric.global_rank == rank:
+                    memory.get_GPU_memory(device=rank)
+                if fabric.is_global_zero:
+                    memory.get_CPU_memory()
+                    
+    if verbose >=0:
+        fabric.print('Training complete!')
 
 
 def parse_args():
