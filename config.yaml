@@ -16,7 +16,7 @@ validation_split: 0.2
 get_wandb: False
 wandb_project: 'train_decoder_parallel'
 num_gpus: 2
-verbose: True
+verbose: 2
 prot_max_length: 600
 mol_max_length: 80
 es_patience: 5

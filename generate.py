@@ -6,6 +6,7 @@ import torch.nn.functional as F
 import pandas as pd
 from lightning.fabric import Fabric
 import time
+from utils.molecular_properties import compute_properties
 
 
 # Generate new text (SMILES strings) using the model
@@ -68,13 +69,22 @@ def generate_smiles(model, sequence, max_length=50, temperature=1.0, verbose=Tru
         
     return tokenizer.decode(generated_token_ids, skip_special_tokens=True)
 
-def generate(quantity, sequence, max_length=50, temperature=1.0, verbose=False):
+def generate(quantity, sequence, max_length=50, temperature=1.0, verbose=False, outdir='.'):
+    valid_smiles = []
     for i in range(quantity):
-        print(f'Generating SMILES string {i+1}...')
         generated_smiles = generate_smiles(model, sequence, max_length, temperature, verbose=verbose)
         print(generated_smiles)
+        try:
+            smi, sa, qed, mw, logp, tpsa, nhd, nha = compute_properties(generated_smiles)
+            valid_smiles.append([smi, sa, qed, mw, logp, tpsa, nhd, nha])
+        except:
+            pass
+        
+    # Save the properties in a dataframe
+    df_smiles_props = pd.DataFrame(valid_smiles, columns=['smiles', 'SAscore','QED', 'mw', 'logp', 'tpsa', 'nHD', 'nHA'])
+    df_smiles_props.to_csv('%s/generated_smiles.csv'%outdir, index=False)
     
-
+    return df_smiles_props
 
 if __name__ == '__main__':
     
@@ -112,6 +122,7 @@ if __name__ == '__main__':
     print(smile)
     print(len(smile))
     
-    some_generated_smiles = generate(10, sequence, max_length=100, 
+    some_generated_smiles = generate(100, sequence, max_length=100, 
                                      temperature=1.0, verbose=False)
     print(some_generated_smiles)
+    print('Generated SMILES:', len(some_generated_smiles))

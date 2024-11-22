@@ -5,7 +5,7 @@ def get_GPU_memory(device):
     current_memory = torch.cuda.memory_allocated(device)
     reserved_memory = torch.cuda.memory_reserved(device)
     max_reserved_memory = torch.cuda.max_memory_reserved(device)
-    print('.........GPU Memory.........')
+    print(f'.........{device} GPU Memory.........')
     print("Current GPU memory usage: %.2f MB" % (current_memory /
                                                  1024 / 1024))
     print("Reserved GPU memory: %.2f MB" % (reserved_memory /
@@ -15,7 +15,7 @@ def get_GPU_memory(device):
     free, total = torch.cuda.mem_get_info(device)
     print("Free %.2f MB " % (free / 1024 / 1024))
     print("Total %.2f MB" % (total / 1024 / 1024))
-    print('...........................')
+    print('.....................................')
 
 def get_CPU_memory():
     memory_info = psutil.virtual_memory()
@@ -30,6 +30,7 @@ def get_CPU_memory():
                                                  1024 / 1024))
     print('Available CPU memory: %.2f MB' % (available_memory / 
                                              1024 / 1024))
+    print('............................')
 def select_device(verbose=False):
     num_gpus = torch.cuda.device_count()
     max_perc = 0

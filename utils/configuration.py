@@ -6,6 +6,11 @@ def load_config(config_path):
     with open(config_path, 'r') as file:
         config = yaml.safe_load(file)
         
+    if not isinstance(config['verbose'], int):
+        raise ValueError('The verbose parameter must be set to 0, 1, or 2.')
+    elif config['verbose'] not in [0, 1, 2]:
+        raise ValueError('The verbose parameter must be set to 0, 1, or 2.')
+        
     # Load configuration variables
     config_dict = {
         'data_path': config['data_path'],
