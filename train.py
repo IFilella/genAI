@@ -205,10 +205,10 @@ def train_model(prot_seqs,
     fabric.seed_everything(1234, workers=True)
 
     if get_wandb and fabric.is_global_zero:
-        wandb.init(
-            project=wandb_project,
-            config=wandb_config
-        )
+            wandb.init(
+                project=wandb_project,
+                config=wandb_config
+            )
 
     # Tokenizer initialization
     tokenizer = Tokenizer()
@@ -300,7 +300,7 @@ def train_model(prot_seqs,
                 fabric.print(f"Precision: {other_metrics['precision']:.4f}, "\
                             f"Recall: {other_metrics['recall']:.4f}, F1: {other_metrics['f1']:.4f}")
 
-            if get_wandb:
+            if get_wandb and fabric.is_global_zero:
                 # log metrics to wandb
                 wandb.log({"Epoch": epoch+1, "Train Loss": avg_train_loss,
                         "Train Accuracy": avg_train_acc,
