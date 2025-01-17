@@ -26,6 +26,7 @@ def load_config(config_path):
         'learning_rate': config['learning_rate'],
         'loss_function': config['loss_function'],
         'optimizer': config['optimizer'],
+        'weight_decay': config['weight_decay'],
         'weights_path': config['weights_path'],
         'validation_split': config['validation_split'],
         'get_wandb': config['get_wandb'],
@@ -50,6 +51,7 @@ def load_config(config_path):
             "ff_hidden_layer": config['ff_hidden_layer'],
             "dropout": config['dropout'],
             "num_layers": config['num_layers'],
+            "weight_decay": config['weight_decay'],
             "architecture": "Decoder-only",
             "dataset": "ChEMBL_BindingDB_sorted",
         }

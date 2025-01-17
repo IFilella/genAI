@@ -159,6 +159,7 @@ def train_model(prot_seqs,
                 num_layers=12,
                 loss_function='crossentropy',
                 optimizer='Adam',
+                weight_decay=0,
                 weights_path='weights/best_model_weights.pth',
                 get_wandb=False,
                 wandb_project=None,
@@ -188,6 +189,7 @@ def train_model(prot_seqs,
         num_layers (int, optional): The number of transformer layers. Defaults to 12.
         loss_function (str, optional): The loss function to use. Defaults to 'crossentropy'.
         optimizer (str, optional): The optimizer to use. Defaults to 'Adam'.
+        weight_decay (float, optional): The weight decay (L2 regularization) for optimizer. Defaults to 0.
         weights_path (str, optional): The path to save the model weights. Defaults to 'weights/best_model_weights.pth'.
         get_wandb (bool, optional): Whether to log metrics to wandb. Defaults to False.
         wandb_project (str, optional): The wandb project name. Defaults to None.
@@ -244,7 +246,10 @@ def train_model(prot_seqs,
 
     # Optimizer
     if optimizer == 'Adam':
-        optimizer = optim.Adam(model.parameters(), lr=lr)
+        if weight_decay:
+            optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+        else:
+            optimizer = optim.Adam(model.parameters(), lr=lr)
     else:
         raise ValueError('Invalid optimizer. Please use "Adam"')
 
@@ -361,8 +366,9 @@ def main():
     train_model(prots, mols, config['num_epochs'], config['learning_rate'],
                 config['batch_size'], config['d_model'], config['num_heads'],
                 config['ff_hidden_layer'], config['dropout'], config['num_layers'],
-                config['loss_function'], config['optimizer'], config['weights_path'],
-                config['get_wandb'], config['wandb']['wandb_project'], config['wandb']['wandb_config'],
+                config['loss_function'], config['optimizer'], config['weight_decay'],
+                config['weights_path'], config['get_wandb'],
+                config['wandb']['wandb_project'], config['wandb']['wandb_config'],
                 config['validation_split'], config['num_gpus'], config['verbose'],
                 config['prot_max_length'], config['mol_max_length'],
                 config['es_patience'], config['es_delta'])
