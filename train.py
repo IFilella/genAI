@@ -250,6 +250,11 @@ def train_model(prot_seqs,
             optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
         else:
             optimizer = optim.Adam(model.parameters(), lr=lr)
+    if optimizer == 'AdamW':
+        if weight_decay:
+            optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+        else:
+            optimizer = optim.AdamW(model.parameters(), lr=lr)
     else:
         raise ValueError('Invalid optimizer. Please use "Adam"')
 
