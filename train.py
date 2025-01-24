@@ -160,6 +160,7 @@ def train_model(prot_seqs,
                 loss_function='crossentropy',
                 optimizer='Adam',
                 weight_decay=0,
+                betas=(0.9, 0.999),
                 weights_path='weights/best_model_weights.pth',
                 get_wandb=False,
                 wandb_project=None,
@@ -191,6 +192,7 @@ def train_model(prot_seqs,
         loss_function (str, optional): The loss function to use. Defaults to 'crossentropy'.
         optimizer (str, optional): The optimizer to use. Defaults to 'Adam'.
         weight_decay (float, optional): The weight decay (L2 regularization) for optimizer. Defaults to 0.
+        betas (tuple, optional): The beta values for the optimizer. Defaults to (0.9, 0.999).
         weights_path (str, optional): The path to save the model weights. Defaults to 'weights/best_model_weights.pth'.
         get_wandb (bool, optional): Whether to log metrics to wandb. Defaults to False.
         wandb_project (str, optional): The wandb project name. Defaults to None.
@@ -255,8 +257,8 @@ def train_model(prot_seqs,
         else:
             optimizer = optim.Adam(model.parameters(), lr=lr)
     elif optimizer == 'AdamW':
-        if weight_decay:
-            optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+        if weight_decay and betas:
+            optimizer = optim.AdamW(model.parameters(), lr=lr, betas=betas, weight_decay=weight_decay)
         else:
             optimizer = optim.AdamW(model.parameters(), lr=lr)
     else:
@@ -375,7 +377,7 @@ def main():
     train_model(prots, mols, config['num_epochs'], config['learning_rate'],
                 config['batch_size'], config['d_model'], config['num_heads'],
                 config['ff_hidden_layer'], config['dropout'], config['num_layers'],
-                config['loss_function'], config['optimizer'], config['weight_decay'],
+                config['loss_function'], config['optimizer'], config['weight_decay'], config['betas'],
                 config['weights_path'], config['get_wandb'],config['wandb']['wandb_project'],
                 config['wandb']['wandb_config'], config['wandb']['wandb_name'],
                 config['validation_split'], config['num_gpus'], config['verbose'],

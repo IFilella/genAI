@@ -27,6 +27,7 @@ def load_config(config_path):
         'loss_function': config['loss_function'],
         'optimizer': config['optimizer'],
         'weight_decay': config['weight_decay'],
+        'betas': config['betas'],
         'weights_path': config['weights_path'],
         'validation_split': config['validation_split'],
         'get_wandb': config['get_wandb'],
