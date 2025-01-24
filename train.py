@@ -164,6 +164,7 @@ def train_model(prot_seqs,
                 get_wandb=False,
                 wandb_project=None,
                 wandb_config=None,
+                wandb_name='Decoder-only',
                 validation_split = 0.2,
                 num_gpus=2,
                 verbose=False,
@@ -194,6 +195,7 @@ def train_model(prot_seqs,
         get_wandb (bool, optional): Whether to log metrics to wandb. Defaults to False.
         wandb_project (str, optional): The wandb project name. Defaults to None.
         wandb_config (dict, optional): The wandb configuration dictionary. Defaults to None.
+        wandb_name (str, optional): The wandb run name. Defaults to 'Decoder-only'.
         validation_split (float, optional): The fraction of the data to use for validation. Defaults to 0.2.
         num_gpus (int, optional): The number of GPUs to use. Defaults to 2.
         verbose (int, optional): Different levels of verbosity (0, 1, or 2). Defaults to 0. 
@@ -209,7 +211,8 @@ def train_model(prot_seqs,
     if get_wandb and fabric.is_global_zero:
             wandb.init(
                 project=wandb_project,
-                config=wandb_config
+                config=wandb_config,
+                name=wandb_name
             )
 
     # Tokenizer initialization
@@ -245,12 +248,13 @@ def train_model(prot_seqs,
         raise ValueError('Invalid loss function. Please use "crossentropy"')
 
     # Optimizer
+    print(optimizer)
     if optimizer == 'Adam':
         if weight_decay:
             optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
         else:
             optimizer = optim.Adam(model.parameters(), lr=lr)
-    if optimizer == 'AdamW':
+    elif optimizer == 'AdamW':
         if weight_decay:
             optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
         else:
@@ -372,8 +376,8 @@ def main():
                 config['batch_size'], config['d_model'], config['num_heads'],
                 config['ff_hidden_layer'], config['dropout'], config['num_layers'],
                 config['loss_function'], config['optimizer'], config['weight_decay'],
-                config['weights_path'], config['get_wandb'],
-                config['wandb']['wandb_project'], config['wandb']['wandb_config'],
+                config['weights_path'], config['get_wandb'],config['wandb']['wandb_project'],
+                config['wandb']['wandb_config'], config['wandb']['wandb_name'],
                 config['validation_split'], config['num_gpus'], config['verbose'],
                 config['prot_max_length'], config['mol_max_length'],
                 config['es_patience'], config['es_delta'])

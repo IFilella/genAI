@@ -33,6 +33,7 @@ def load_config(config_path):
         'num_gpus': config['num_gpus'],
         'verbose': config['verbose'],
         'wandb_project': config['wandb_project'],
+        'wandb_name': config['wandb_name'],
         'prot_max_length': config['prot_max_length'],
         'mol_max_length': config['mol_max_length'],
         'es_patience': config['es_patience'],
@@ -54,7 +55,11 @@ def load_config(config_path):
             "weight_decay": config['weight_decay'],
             "architecture": "Decoder-only",
             "dataset": "ChEMBL_BindingDB_sorted",
-        }
+        },
+        'wandb_name': config['wandb_name'] + '_dmod' + str(config['d_model'])\
+            + '_head' + str(config['num_heads']) + '_ff' + str(config['ff_hidden_layer'])\
+            + '_lay' + str(config['num_layers']) + '_lr' + str(config['learning_rate'])\
+            + '_bat' + str(config['batch_size']) + '_drop' + str(config['dropout'])
     }
     
     return config_dict
