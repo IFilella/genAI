@@ -18,11 +18,11 @@ for config_file in "$config_dir"/*.yaml; do
   
   cat <<EOL > "$run_file"
 #!/bin/bash
-#SBATCH --job-name=train_${counter}
+#SBATCH --job-name=train_${config_base}
 #SBATCH --account=bsc72
 #SBATCH --chdir=.
-#SBATCH --output=logs/train_${counter}_%j.out
-#SBATCH --error=logs/train_${counter}_%j.err
+#SBATCH --output=logs/train_${config_base}_%j.out
+#SBATCH --error=logs/train_${config_base}_%j.err
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=4
 #SBATCH --cpus-per-task=20
