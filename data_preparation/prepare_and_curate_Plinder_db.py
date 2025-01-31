@@ -4,7 +4,7 @@ import pandas as pd
 import multiprocessing as mp
 import os
 
-#"""
+"""
 # Open the data
 df = pd.read_csv('../data/raw/plinder_db.csv', index_col=0)
 print(df.columns)
@@ -59,7 +59,6 @@ print(df_sort)
     
 # Save the sorted and cleaned data
 df_sort.to_csv('../data/data_plinder_filt_clean.csv')
-#"""
 
 # Join this df with the one from BindingDB and ChEMBL
 df_chembl_bindingdb = pd.read_csv('../data/data_ChEMBL_BindingDB_clean.csv', index_col=0)
@@ -78,3 +77,28 @@ print(len(df_final))
 df_final = df_final.drop_duplicates(subset=['Sequence', 'SMILES'], keep='first')
 print(len(df_final))
 print(df_final)
+df_final.to_csv('../data/data_ChEMBL_BindingDB_Plinder_clean.csv')
+"""
+
+# Sanitize protein sequences: remove sequences containing X, B, Z, J, and non-alphabetic characters
+df_final = pd.read_csv('../data/data_ChEMBL_BindingDB_Plinder_clean.csv', index_col=0)
+print(len(df_final))
+df_final['Sequence'] = df_final['Sequence'].apply(lambda x: x if 'X' not in x else None)
+df_final = df_final.dropna(subset=['Sequence'])
+print(len(df_final))
+df_final['Sequence'] = df_final['Sequence'].apply(lambda x: x if 'B' not in x else None)
+df_final = df_final.dropna(subset=['Sequence'])
+print(len(df_final))
+df_final['Sequence'] = df_final['Sequence'].apply(lambda x: x if 'Z' not in x else None)
+df_final = df_final.dropna(subset=['Sequence'])
+print(len(df_final))
+df_final['Sequence'] = df_final['Sequence'].apply(lambda x: x if 'J' not in x else None)
+df_final = df_final.dropna(subset=['Sequence'])
+print(len(df_final))
+
+# Sanitize protein sequences: drop sequences with repeated amino acids (more than 90% of the sequence)
+from collections import Counter
+df_final['Sequence'] = df_final['Sequence'].apply(lambda x: x if Counter(x).most_common(1)[0][1]/len(x) <= 0.7 else None)
+df_final = df_final.dropna(subset=['Sequence'])
+print(len(df_final))
+df_final.to_csv('../data/data_ChEMBL_BindingDB_Plinder_clean.csv', index=False)
