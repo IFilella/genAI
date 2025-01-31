@@ -239,8 +239,10 @@ def train_model(prot_seqs,
     f"Expected output layer size {vocab_size}, but got {model.linear.out_features}"
 
     # Print model information
+    parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     if verbose >=1 and fabric.is_global_zero:
         summary(model)
+        fabric.print(f'The model has {parameters} trainable parameters.')
 
     # TO DO: Add support for other loss functions and optimizers
     # Loss function
