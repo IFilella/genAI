@@ -1,7 +1,8 @@
 import torch
-from torch.utils.data import Dataset, DataLoader, Subset
-from torch.utils.data.distributed import DistributedSampler
+from torch.utils.data import Dataset, DataLoader, Subset, random_split, DistributedSampler
 import random
+import numpy as np
+import matplotlib.pyplot as plt
 
 # DATASET CLASS
 class ProtMolDataset(Dataset):
@@ -33,6 +34,7 @@ def collate_fn(batch, tokenizer, prot_max_length, mol_max_length):
     # Tokenize the protein sequences and SMILES strings
     prot_seqs = [prot_seq for prot_seq, _ in batch]
     smiles = [smile for _, smile in batch]
+
     encoded_texts = tokenizer(prot_seqs, smiles,
                               prot_max_length=prot_max_length,
                               mol_max_length=mol_max_length)
@@ -54,27 +56,6 @@ def collate_fn(batch, tokenizer, prot_max_length, mol_max_length):
     
     return {'input_ids': input_ids, 'attention_mask': attention_mask, 'labels': labels}
 
-# Custom function to randomly split but keep original order in each subset
-def ordered_random_split(dataset, split_ratio=0.8, seed=0):
-    random.seed(seed)
-    total_size = len(dataset)
-    
-    train_size = int(total_size * split_ratio)
-    test_size = total_size - train_size
-    
-    indices = list(range(total_size))
-    random.shuffle(indices)
-    
-    # Split random indices into train and test and sort them to keep order
-    train_indices = sorted(indices[:train_size])
-    test_indices = sorted(indices[train_size:])
-    
-    # Create Subsets using sorted indices
-    train_dataset = Subset(dataset, train_indices)
-    test_dataset = Subset(dataset, test_indices)
-    
-    return train_dataset, test_dataset
-
 # DATA PREPARATION
 def prepare_data(prot_seqs, smiles, validation_split, batch_size, tokenizer,
                  fabric, prot_max_length, mol_max_length, verbose):
@@ -86,17 +67,60 @@ def prepare_data(prot_seqs, smiles, validation_split, batch_size, tokenizer,
 
     if verbose >=0:
         fabric.print('Splitting the dataset...')
+    
+    # Split the dataset into train and validation randomly
+    torch.manual_seed(0)
+    val_size = int(validation_split * len(dataset))
+    train_size = len(dataset) - val_size
+    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+    
+    # Sort the datasets based on the lengths of the sequences
+    idxs_train = list(range(len(train_dataset)))
+    idxs_val = list(range(len(val_dataset)))
+    train_lengths = [(idx, len(train_dataset[idx][0]) + len(train_dataset[idx][1])) for idx in idxs_train]
+    val_lengths = [(idx, len(val_dataset[idx][0]) + len(val_dataset[idx][1])) for idx in idxs_val]
+    sorted_train_indices = [idx for idx, length in sorted(train_lengths, key=lambda x: x[1])]
+    sorted_val_indices = [idx for idx, length in sorted(val_lengths, key=lambda x: x[1])]
 
-    train_dataset, val_dataset = ordered_random_split(dataset, split_ratio=validation_split, seed=0)
+    # Create the sorted datasets using the sorted indices
+    train_dataset = Subset(train_dataset, sorted_train_indices)
+    val_dataset = Subset(val_dataset, sorted_val_indices)
+    
+    # Check if the sort worked
+    if verbose >= 2:
+        fabric.print('Lenghts of the sequences in the train and validation datasets:')
+        train_lengths = [len(train_dataset[idx][0]) + len(train_dataset[idx][1]) for idx in idxs_train]
+        val_lengths = [len(val_dataset[idx][0]) + len(val_dataset[idx][1]) for idx in idxs_val]
+        fabric.print(np.asarray(train_lengths))
+        fabric.print(np.asarray(val_lengths))
+    
+    # Plot the distribution of the lengths of the proteins and molecules in the train and validation datasets
+    if verbose >= 2:
+        fabric.print('Plotting the distribution of the lengths of the proteins and molecules...')
+        plt.figure()    
+        train_prots_lenghts = [len(train_dataset[idx][0]) for idx in idxs_train]
+        val_prots_lenghts = [len(val_dataset[idx][0]) for idx in idxs_val]
+        plt.hist(train_prots_lenghts, bins=75, label='train proteins', alpha=0.5)
+        plt.hist(val_prots_lenghts, bins=75, label='val proteins', alpha=0.5)
+        plt.legend()
+        plt.savefig('plots/hist_train_test_prots.pdf')
+        
+        plt.figure()
+        train_mols_lenghts = [len(train_dataset[idx][1]) for idx in idxs_train]
+        val_mols_lenghts = [len(val_dataset[idx][1]) for idx in idxs_val]
+        plt.hist(train_mols_lenghts, bins=100, label='train mols',alpha=0.5)
+        plt.hist(val_mols_lenghts, bins=100, label='val mols', alpha=0.5)
+        plt.legend()
+        plt.savefig('plots/hist_train_test_mols.pdf')
     
     if verbose >=1:
         fabric.print(f"Train dataset size: {len(train_dataset)}, "\
                     f"Validation dataset size: {len(val_dataset)}")
-
+    
     if verbose >=0:
         fabric.print('Initializing the dataloaders...')
     
-    sampler_train = DistributedSampler(train_dataset, shuffle=False)
+    sampler_train = DistributedSampler(train_dataset, shuffle=False, drop_last=False)
     train_dataloader = DataLoader(train_dataset,
                                   batch_size=batch_size,
                                   shuffle=False,
@@ -105,7 +129,7 @@ def prepare_data(prot_seqs, smiles, validation_split, batch_size, tokenizer,
                                                                   prot_max_length,
                                                                   mol_max_length))
     
-    sampler_val = DistributedSampler(val_dataset, shuffle=False)
+    sampler_val = DistributedSampler(val_dataset, shuffle=False, drop_last=False)
     val_dataloader = DataLoader(val_dataset,
                                 batch_size=batch_size,
                                 shuffle=False,
