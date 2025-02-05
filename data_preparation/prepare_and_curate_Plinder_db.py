@@ -23,8 +23,10 @@ df_filt = df_filt[df_filt['Sequence'].map(lambda x: len(str(x)) > 60)]
 print(len(df_filt))
 
 # Filter the molecules with SMILES length smaller than 80 and larger than 4
-df_filt = df_filt[df_filt['SMILES'].map(lambda x: len(str(x)) < 80)]
-df_filt = df_filt[df_filt['SMILES'].map(lambda x: len(str(x)) > 4)]
+df_filt['SMILES'] = df_filt['SMILES'].apply(lambda x: x if len(x) < 80 else None)
+df_filt = df_filt.dropna(subset=['SMILES'])
+df_filt['SMILES'] = df_filt['SMILES'].apply(lambda x: x if len(x) > 4 else None)
+df_filt = df_filt.dropna(subset=['SMILES'])
 print(len(df_filt))
 
 # Just in case, fix the protein sequences that are written like chunks (there were some cases in BindingDB)
@@ -33,7 +35,7 @@ df_filt['Sequence'] = df_filt['Sequence'].apply(lambda x: x.replace(' ','').repl
 # Just in case, uppercase all the protein sequences
 df_filt['Sequence'] = df_filt['Sequence'].apply(lambda x: x.upper())
 
-# Clean the SMILES: sanitize the molecules
+# Clean the SMILES: sanitize the molecules and filter them by number of heavy atoms
 from curate_dataset_mols_prots import sanitize_molecules
 df_filt['SMILES'] = df_filt['SMILES'].apply(sanitize_molecules)
 df_filt = df_filt.dropna(subset=['SMILES'])

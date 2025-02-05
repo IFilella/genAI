@@ -20,8 +20,10 @@ df = df[df['Sequence'].map(lambda x: len(str(x)) > 60)]
 print(len(df))
 
 # Filter molecules with SMILES length smaller than 80 and larger than 4
-df = df[df['SMILES'].map(lambda x: len(str(x)) < 80)]
-df = df[df['SMILES'].map(lambda x: len(str(x)) > 4)]
+df['SMILES'] = df['SMILES'].apply(lambda x: x if len(x) < 80 else None)
+df = df.dropna(subset=['SMILES'])
+df['SMILES'] = df['SMILES'].apply(lambda x: x if len(x) > 4 else None)
+df = df.dropna(subset=['SMILES'])
 print(len(df))
 
 # Just in case, fix the protein sequences that are written like chunks
@@ -30,7 +32,7 @@ df['Sequence'] = df['Sequence'].apply(lambda x: x.replace(' ','').replace('\n','
 # Uppercase the protein sequences
 df['Sequence'] = df['Sequence'].apply(lambda x: x.upper())
 
-# Curate the SMILES: saninitize the molecules
+# Curate the SMILES: saninitize the molecules and filter them by number of heavy atoms
 from curate_dataset_mols_prots import sanitize_molecules
 df['SMILES'] = df['SMILES'].apply(sanitize_molecules)
 df = df.dropna(subset=['SMILES'])

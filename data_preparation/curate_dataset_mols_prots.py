@@ -9,12 +9,19 @@ from multiprocessing import Pool, cpu_count
 def sanitize_molecules(smile):
     remover = SaltRemover()
     try:
+        # Check if the molecule is valid
         mol = Chem.MolFromSmiles(smile)
-        a = remover.StripMol(mol, dontRemoveEverything=True)
-        e = Cleanup(a)
-        s = standardizer.standardize_mol(e)
-        clean_smile = Chem.MolToSmiles(s)
-        return clean_smile
+        # Filter dataset by heavy atoms
+        atoms = mol.GetNumHeavyAtoms()
+        if atoms < 4 or atoms > 70:
+            return None
+        else:
+            # Remove salts and clean up the molecule
+            a = remover.StripMol(mol, dontRemoveEverything=True)
+            e = Cleanup(a)
+            s = standardizer.standardize_mol(e)
+            clean_smile = Chem.MolToSmiles(s)
+            return clean_smile
     except:
         print(f"Failed to sanitize molecule: {smile}")
         return None
