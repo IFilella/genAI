@@ -57,10 +57,10 @@ def load_config(config_path):
             "architecture": "Decoder-only",
             "dataset": "ChEMBL_BindingDB_sorted",
         },
-        'wandb_name': config['wandb_name'] + '_dmod' + str(config['d_model'])\
-            + '_head' + str(config['num_heads']) + '_ff' + str(config['ff_hidden_layer'])\
-            + '_lay' + str(config['num_layers']) + '_lr' + str(config['learning_rate'])\
-            + '_bat' + str(config['batch_size']) + '_drop' + str(config['dropout'])
+        'wandb_name': config['wandb_name'] + '_dm' + str(config['d_model'])\
+            + '_nh' + str(config['num_heads']) + '_ff' + str(config['ff_hidden_layer'])\
+            + '_nl' + str(config['num_layers']) + '_lr' + str(config['learning_rate'])\
+            + '_bt' + str(config['batch_size']) + '_dp' + str(config['dropout'])
     }
     
     return config_dict

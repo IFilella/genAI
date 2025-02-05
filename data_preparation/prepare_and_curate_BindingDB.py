@@ -3,6 +3,7 @@ from rdkit.Chem import PandasTools
 import pandas as pd
 import multiprocessing as mp
 import os
+from collections import Counter
 
 
 def sdf_to_csv(sdf_file, output_file, delimiter=','):
@@ -123,13 +124,9 @@ if __name__ == '__main__':
     # df.to_pickle(csv_file.replace('.csv', '.pkl'))
 
     # Clean the data
-    df = pd.read_pickle('data/raw/BindingDB_All_2D_202406.pkl')
+    df = pd.read_pickle('../data/raw/BindingDB_All_2D_202406.pkl')
     print(df.columns)
     print(len(df))
-    
-    # Get columns with Homo Sapiens as a source organism --> NO
-    # df = df[df['Target Source Organism According to Curator or DataSource'] == 'Homo sapiens']
-    # print(len(df))
     
     # Drop rows with empty SMILES or target sequence
     df = df[df['SMILES'].notna()]
@@ -141,30 +138,65 @@ if __name__ == '__main__':
     print(len(df))
     
     # Save the filtered df into a new csv file
-    df.to_csv('data/data_BindingDB.csv')
+    df.to_csv('../data/data_BindingDB.csv')
     
     # Save only the SMILES and Protein sequence of this cleaned data
     df_simple = df[['BindingDB Target Chain Sequence', 'SMILES']]
     df_simple = df_simple.rename(columns={'BindingDB Target Chain Sequence': 'Sequence'})
-    df_simple.to_csv('data/data_seqmol_BindingDB.csv')
+    df_simple.to_csv('../data/data_seqmol_BindingDB.csv')
     
     # Filter only rows with proteins no longer than 540 amino acids and larger than 60 amino acids
     df_filt = df[df['BindingDB Target Chain Sequence'].map(lambda x: len(str(x)) < 540)]
     df_filt = df_filt[df_filt['BindingDB Target Chain Sequence'].map(lambda x: len(str(x)) > 60)]
     print(len(df_filt))
     
+    # Filter the molecules with SMILES length smaller than 80 and larger than 4
+    df_filt['SMILES'] = df_filt['SMILES'].apply(lambda x: x if len(x) < 80 else None)
+    df_filt = df_filt.dropna(subset=['SMILES'])
+    df_filt['SMILES'] = df_filt['SMILES'].apply(lambda x: x if len(x) > 4 else None)
+    df_filt = df_filt.dropna(subset=['SMILES'])
+    print(len(df_filt))
+    
     # Save only the SMILES and Protein sequence of this cleaned data
     df_simple = df_filt[['BindingDB Target Chain Sequence', 'SMILES']]
     df_simple = df_simple.rename(columns={'BindingDB Target Chain Sequence': 'Sequence'})
-    df_simple.to_csv('data/data_seqmol_BindingDB_filt.csv')
+    df_simple.to_csv('../data/data_seqmol_BindingDB_filt.csv')
     
     # Finally, fix the protein sequences that are written like chunks
     df_simple['Sequence'] = df_simple['Sequence'].apply(lambda x: x.replace(' ','').replace('\n',''))
-    df_simple.to_csv('data/data_seqmol_BindingDB_filt.csv')
+    df_simple.to_csv('../data/data_seqmol_BindingDB_filt.csv')
     
-    # Filter the molecules with SMILES length smaller than 80
-    df_filt = df_filt[df_filt['SMILES'].map(lambda x: len(str(x)) < 80)]
-    print(len(df_filt))
-    df_simple.to_csv('data/data_seqmol_BindingDB_filt.csv')
+    # Uppercase the protein sequences
+    df_simple['Sequence'] = df_simple['Sequence'].apply(lambda x: x.upper())
     
+    # Curate the SMILES: saninitize the molecules and filter them by number of heavy atoms
+    from curate_dataset_mols_prots import sanitize_molecules
+    df_simple['SMILES'] = df_simple['SMILES'].apply(sanitize_molecules)
+    df_simple = df_simple.dropna(subset=['SMILES'])
+    print(df_simple)
+
+    # Curate the protein Sequences: remove non-canonical amino acids
+    df_simple['Sequence'] = df_simple['Sequence'].apply(lambda x: x if 'X' not in x else None)
+    df_simple = df_simple.dropna(subset=['Sequence'])
+    print(len(df_simple))
+    df_simple['Sequence'] = df_simple['Sequence'].apply(lambda x: x if 'B' not in x else None)
+    df_simple = df_simple.dropna(subset=['Sequence'])
+    print(len(df_simple))
+    df_simple['Sequence'] = df_simple['Sequence'].apply(lambda x: x if 'Z' not in x else None)
+    df_simple = df_simple.dropna(subset=['Sequence'])
+    print(len(df_simple))
+    df_simple['Sequence'] = df_simple['Sequence'].apply(lambda x: x if 'J' not in x else None)
+    df_simple = df_simple.dropna(subset=['Sequence'])
+    print(len(df_simple))
     
+    # Curate the protein Sequences: drop sequences with repeated amino acids (more than 70% of the sequence)
+    df_simple['Sequence'] = df_simple['Sequence'].apply(lambda x: x if Counter(x).most_common(1)[0][1]/len(x) <= 0.7 else None)
+    df_simple = df_simple.dropna(subset=['Sequence'])
+    print(len(df_simple))
+    
+    # Drop duplicates (Sequence and SMILES)
+    df_simple = df_simple.drop_duplicates(subset=['Sequence', 'SMILES'], keep='first')
+    print(len(df_simple))
+    
+    # Save the cleaned data
+    df_simple.to_csv('../data/data_seqmol_BindingDB_clean.csv')
