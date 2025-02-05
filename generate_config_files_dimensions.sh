@@ -19,7 +19,7 @@ for i in "${!d_model[@]}"; do
   # Create the YAML content
   cat <<EOL > configs/model_dimensions/$filename.yaml
 
-data_path: 'data/data_ChEMBL_BindingDB_clean.csv'
+data_path: 'data/data_ChEMBL_BindingDB_Plinder_clean.csv'
 col_prots: 'Sequence'
 col_mols: 'SMILES'
 d_model: ${d_model[$i]}
@@ -33,10 +33,12 @@ learning_rate: 0.0001
 loss_function: 'crossentropy'
 optimizer: 'AdamW'
 weight_decay: 0.001
+betas: [0.9,0.99]
 weights_path: 'weights/weights_dm${d_model[$i]}_nh${num_heads[$i]}_ff${ff_hidden_layer[$i]}_nl${num_layers[$i]}'
 validation_split: 0.2
 get_wandb: True
 wandb_project: 'train_decoder_hyperparameters'
+wandb_name: 'decoder'
 num_gpus: 4
 verbose: 2
 prot_max_length: 600
