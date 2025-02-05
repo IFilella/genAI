@@ -21,7 +21,7 @@ def set_seed(seed):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-def train_epoch(model, dataloader, criterion, optimizer, tokenizer, fabric):
+def train_epoch(model, dataloader, criterion, optimizer, tokenizer, fabric, verbose=1):
     """Train the model for one epoch."""
 
     model.train()
@@ -31,6 +31,10 @@ def train_epoch(model, dataloader, criterion, optimizer, tokenizer, fabric):
     total_train_samples = 0
 
     for i, batch in enumerate(dataloader):
+        
+        if verbose >= 1 and fabric.is_global_zero:
+            print(f"\tE.Batch {i+1} of {len(dataloader)} with size {batch['input_ids'].shape[0]}")
+            
         input_tensor = batch['input_ids']
         input_att_mask = batch['attention_mask']
         labels = batch['labels']
@@ -72,7 +76,7 @@ def train_epoch(model, dataloader, criterion, optimizer, tokenizer, fabric):
     
     return avg_train_loss, train_acc
 
-def evaluate_epoch(model, dataloader, criterion, tokenizer, fabric):
+def evaluate_epoch(model, dataloader, criterion, tokenizer, fabric, verbose=1):
     """Evaluate the model for one epoch."""
 
     model.eval()
@@ -85,6 +89,10 @@ def evaluate_epoch(model, dataloader, criterion, tokenizer, fabric):
     with torch.no_grad():
 
         for i, batch in enumerate(dataloader):
+            
+            if verbose >= 1 and fabric.is_global_zero:
+                print(f"\tE.Batch {i+1} of {len(dataloader)} with size {batch['input_ids'].shape[0]}")
+                
             input_tensor = batch['input_ids']
             labels = batch['labels']
 
@@ -126,6 +134,8 @@ def evaluate_epoch(model, dataloader, criterion, tokenizer, fabric):
             total_val_predicted.extend(predicted.cpu().numpy())
             total_val_labels.extend(labels.cpu().numpy())
             correct = (predicted == labels).sum().item()
+            
+            fabric.barrier()
             
     avg_val_loss = total_val_loss / len(dataloader)
     precision = precision_score(total_val_labels,
