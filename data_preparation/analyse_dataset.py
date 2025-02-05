@@ -22,6 +22,7 @@ max_mol_length_idx = df['mol_len'].idxmax()
 print('Max SMILES length:', max_mol_length)
 print('Max SMILES length index:', max_mol_length_idx)
 print('Max SMILES:', df.loc[max_mol_length_idx, 'SMILES'])
+print('Max SMILES row:', df.loc[max_mol_length_idx])
 # Drop the row with mol len higher than 80
 df['SMILES'] = df['SMILES'].apply(lambda x: x if len(x) < 80 else None)
 df = df.dropna()
@@ -42,6 +43,7 @@ min_mol_length_idx = df['mol_len'].idxmin()
 print('Min SMILES length:', min_mol_length)
 print('Min SMILES length index:', min_mol_length_idx)
 print('Min SMILES:', df.loc[min_mol_length_idx, 'SMILES'])
+print('Min SMILES row:', df.loc[min_mol_length_idx])
 # Drop the row with mol len lower than 4
 df['SMILES'] = df['SMILES'].apply(lambda x: x if len(x) > 4 else None)
 df = df.dropna()
@@ -50,6 +52,36 @@ min_mol_length_idx = df['mol_len'].idxmin()
 print('Min SMILES length:', min_mol_length)
 print('Min SMILES length index:', min_mol_length_idx)
 print('Min SMILES:', df.loc[min_mol_length_idx, 'SMILES'])
+print(len(df))
+
+# Check the number of heavy atoms in the SMILES
+from rdkit import Chem
+df['atoms'] = df['SMILES'].apply(lambda x: Chem.MolFromSmiles(x).GetNumHeavyAtoms())
+min_num_atoms = df['atoms'].min()
+min_num_atoms_idx = df['atoms'].idxmin()
+print('Min number of heavy atoms:', min_num_atoms)
+print('Min number of heavy atoms index:', min_num_atoms_idx)
+print('Min number of heavy atoms SMILES:', df.loc[min_num_atoms_idx, 'SMILES'])
+max_num_atoms = df['atoms'].max()
+max_num_atoms_idx = df['atoms'].idxmax()
+print('Max number of heavy atoms:', max_num_atoms)
+print('Max number of heavy atoms index:', max_num_atoms_idx)
+print('Max number of heavy atoms SMILES:', df.loc[max_num_atoms_idx, 'SMILES'])
+# Drop the row with less or equal to 4 heavy atoms
+df = df[df['atoms'] > 4]
+min_num_atoms = df['atoms'].min()
+min_num_atoms_idx = df['atoms'].idxmin()
+print('Min number of heavy atoms:', min_num_atoms)
+print('Min number of heavy atoms index:', min_num_atoms_idx)
+print('Min number of heavy atoms SMILES:', df.loc[min_num_atoms_idx, 'SMILES'])
+print(len(df))
+# Drop the row with more than 70 heavy atoms
+df = df[df['atoms'] < 70]
+max_num_atoms = df['atoms'].max()
+max_num_atoms_idx = df['atoms'].idxmax()
+print('Max number of heavy atoms:', max_num_atoms)
+print('Max number of heavy atoms index:', max_num_atoms_idx)
+print('Max number of heavy atoms SMILES:', df.loc[max_num_atoms_idx, 'SMILES'])
 print(len(df))
 
 # Save this cleaned dataset
