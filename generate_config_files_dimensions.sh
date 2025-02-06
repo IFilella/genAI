@@ -45,6 +45,8 @@ prot_max_length: 600
 mol_max_length: 80
 es_patience: 6
 es_delta: 0.0001
+seed: 1234
+
 EOL
 
   echo "Generated: configs/model_dimensions/$filename.yaml"

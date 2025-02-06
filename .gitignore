@@ -13,3 +13,4 @@ runs/
 *.json
 *.gv
 memory_snapshot.pickle
+last_sync.txt
