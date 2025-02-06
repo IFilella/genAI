@@ -58,7 +58,7 @@ def collate_fn(batch, tokenizer, prot_max_length, mol_max_length):
 
 # DATA PREPARATION
 def prepare_data(prot_seqs, smiles, validation_split, batch_size, tokenizer,
-                 fabric, prot_max_length, mol_max_length, verbose):
+                 fabric, prot_max_length, mol_max_length, verbose, seed):
     """Prepares datasets, splits them, and returns the dataloaders."""
     
     if verbose >=0:
@@ -69,7 +69,7 @@ def prepare_data(prot_seqs, smiles, validation_split, batch_size, tokenizer,
         fabric.print('Splitting the dataset...')
     
     # Split the dataset into train and validation randomly
-    torch.manual_seed(0)
+    torch.manual_seed(seed)
     val_size = int(validation_split * len(dataset))
     train_size = len(dataset) - val_size
     train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
