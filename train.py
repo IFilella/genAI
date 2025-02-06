@@ -182,7 +182,8 @@ def train_model(prot_seqs,
                 prot_max_length=600,
                 mol_max_length=80,
                 patience=5,
-                delta=0
+                delta=0,
+                seed=1234
                 ):
 
     """
@@ -215,10 +216,11 @@ def train_model(prot_seqs,
         mol_max_length (int, optional): The maximum length of the SMILES strings. Defaults to 80.
         patience (int, optional): The number of epochs to wait before early stopping. Defaults to 5.
         delta (int, optional): The minimum change in validation loss to qualify as an improvement. Defaults to 0.
+        seed (int, optional): The random seed. Defaults to 1234.
     """
     fabric = Fabric(accelerator='cuda', devices=num_gpus, num_nodes=1, strategy='ddp', precision="bf16-mixed")
     fabric.launch()
-    fabric.seed_everything(1234, workers=True)
+    fabric.seed_everything(seed, workers=True)
 
     if get_wandb and fabric.is_global_zero:
             wandb.init(
@@ -235,7 +237,7 @@ def train_model(prot_seqs,
     train_dataloader, val_dataloader = prepare_data(prot_seqs, smiles,
                                                     validation_split, batch_size,
                                                     tokenizer, fabric, prot_max_length,
-                                                    mol_max_length, verbose)
+                                                    mol_max_length, verbose, seed)
 
     # Model
     if verbose >=0:
@@ -370,9 +372,8 @@ def parse_args():
     return parser.parse_args()
 
 def main():
-    torch.set_float32_matmul_precision('medium')
-    set_seed(1234)
-    
+    """Main function to train the model."""
+        
     timer_total = Timer(autoreset=True)
     timer_total.start('Total time')
 
@@ -380,7 +381,10 @@ def main():
 
     config = load_config(args.config)
 
-    # Get the data (in this case, it is sampled for testing purposes)
+    torch.set_float32_matmul_precision('medium')
+    set_seed(config['seed'])
+    
+    # Get the data
     df = pd.read_csv(config['data_path'])
     prots = df[config['col_prots']].tolist()
     mols = df[config['col_mols']].tolist()
@@ -394,7 +398,7 @@ def main():
                 config['wandb']['wandb_config'], config['wandb']['wandb_name'],
                 config['validation_split'], config['num_gpus'], config['verbose'],
                 config['prot_max_length'], config['mol_max_length'],
-                config['es_patience'], config['es_delta'])
+                config['es_patience'], config['es_delta'], config['seed'])
 
     timer_total.stop()
 
