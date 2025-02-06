@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Directory containing the run scripts
-run_dir="runs/model"
+run_dir="runs/model_dimensions"
 
 # Check if the directory exists
 if [ ! -d "$run_dir" ]; then

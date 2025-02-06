@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # Create directory to store the run scripts
-mkdir -p runs/model
+mkdir -p runs/model_dimensions
 
 # Path to the generated YAML configuration files
-config_dir="configs/model"
+config_dir="configs/model_dimensions"
 
 # Loop through all the YAML files in the config directory
 for config_file in "$config_dir"/*.yaml; do
@@ -14,7 +14,7 @@ for config_file in "$config_dir"/*.yaml; do
   config_base=${config_base%.yaml}
   
   # Generate the run script
-  run_file="runs/model/run_${config_base}.sh"
+  run_file="runs/model_dimensions/run_${config_base}.sh"
   
   cat <<EOL > "$run_file"
 #!/bin/bash
