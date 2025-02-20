@@ -47,7 +47,7 @@ loss_function: 'crossentropy'
 optimizer: 'AdamW'
 weight_decay: $wd
 betas: [$b]
-weights_path: "weights/weights_dm${dm}_nh${nh}_ff${ff}_nl${nl}"
+weights_path: "weights/weights_dm${dm}_nh${nh}_ff${ff}_nl${nl}.pth"
 validation_split: 0.2
 get_wandb: true
 wandb_project: 'train_decoder_hyperparameters'
