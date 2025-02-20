@@ -10,10 +10,7 @@ from utils.molecular_properties import compute_properties
 
 
 # Generate new text (SMILES strings) using the model
-def generate_smiles(model, sequence, max_length=50, temperature=1.0, verbose=True):
-    
-    fabric = Fabric(accelerator='cuda', devices=1)
-    fabric.launch()
+def generate_smiles(model, sequence, fabric, max_length=50, temperature=1.0, verbose=True):
     
     model.eval()  # Set the model to evaluation mode
     model = fabric.to_device(model)
@@ -49,7 +46,7 @@ def generate_smiles(model, sequence, max_length=50, temperature=1.0, verbose=Tru
             next_token_logits = logits[:, -1, :] / temperature
             next_token_probs = F.softmax(next_token_logits, dim=-1)
             next_token_id = torch.multinomial(next_token_probs, num_samples=1).item()
-             
+            
             # Stop generation if the end token is generated
             if next_token_id == mol_tokenizer.eos_token_id:
                 break
@@ -69,37 +66,41 @@ def generate_smiles(model, sequence, max_length=50, temperature=1.0, verbose=Tru
         
     return tokenizer.decode(generated_token_ids, skip_special_tokens=True)
 
-def generate(quantity, sequence, max_length=50, temperature=1.0, verbose=False, outdir='.'):
+def generate(quantity, sequence, fabric, max_length=50, temperature=1.0, verbose=False, outdir='.'):
     valid_smiles = []
-    for i in range(quantity):
-        generated_smiles = generate_smiles(model, sequence, max_length, temperature, verbose=verbose)
+    for _ in range(quantity):
+        generated_smiles = generate_smiles(model, sequence, fabric, max_length, temperature, verbose=verbose)
         print(generated_smiles)
         try:
             smi, sa, qed, mw, logp, tpsa, nhd, nha = compute_properties(generated_smiles)
             valid_smiles.append([smi, sa, qed, mw, logp, tpsa, nhd, nha])
-        except:
+        except Exception:
             pass
-        
+
+    # Calculate the success rate
+    success_rate = len(valid_smiles) / quantity * 100 if quantity > 0 else 0
+    print(f"Success rate of generated molecules: {success_rate:.2f}%")
+    
     # Save the properties in a dataframe
     df_smiles_props = pd.DataFrame(valid_smiles, columns=['smiles', 'SAscore','QED', 'mw', 'logp', 'tpsa', 'nHD', 'nHA'])
     df_smiles_props.to_csv('%s/generated_smiles.csv'%outdir, index=False)
-    
-    return df_smiles_props
+
+    return df_smiles_props, success_rate
 
 if __name__ == '__main__':
     
     time0 = time.time()
 
     # Define the hyperparameters --> make sure that they are the same as the ones in the trained model!!
-    d_model        = 1024
-    num_heads      = 8
-    ff_hidden_layer  = 4*d_model
-    dropout        = 0.1
-    num_layers     = 4
-    batch_size     = 10
-    num_epochs     = 10
+    d_model        = 768
+    num_heads      = 12
+    ff_hidden_layer  = 4608
+    dropout        = 0.25
+    num_layers     = 2
+    batch_size     = 12
+    num_epochs     = 64
     learning_rate  = 0.0001
-    weights_path   = 'weights/best_model_weights.pth'
+    weights_path   = 'weights/weights_dm768_nh12_ff4608_nl2.pth'
 
     # Define the vocabulary size
     tokenizer = Tokenizer()
@@ -110,19 +111,24 @@ if __name__ == '__main__':
     
     # Load the model weights
     print('Loading model weights...')
-    state_dict = torch.load(weights_path, map_location='cuda')
-    model.load_state_dict(state_dict)
-
+    fabric = Fabric(accelerator='cuda', devices=1)
+    fabric.launch()
+    state = {'model': model}
+    fabric.load(weights_path, state)
+    
     # Generate SMILES strings using the trained model given a protein sequence
     print('Generating SMILES strings...')
-    sequence = 'MEQPQEEAPEVREEEEKEEVAEAEGAPELNGGPQHALPSSSYTDLSRSSSPPSLLDQLQMGCDGASCGSLNMECRVCGDKASGFHYGVHACEGCKGFFRRTIRMKLEYEKCERSCKIQKKNRNKCQYCRFQKCLALGMSHNAIRFGRMPEAEKRKLVAGLTANEGSQYNPQVADLKAFSKHIYNAYLKNFNMTKKKARSILTGKASHTAPFVIHDIETLWQAEKGLVWKQLVNGLPPYKEISVHVFYRCQCTTVETVRELTEFAKSIPSFSSLFLNDQVTLLKYGVHEAIFAMLASIVNKDGLLVANGSGFVTREFLRSLRKPFSDIIEPKFEFAVKFNALELDDSDLALFIAAIILCGDRPGLMNVPRVEAIQDTILRALEFHLQANHPDAQYLFPKLLQKMADLRQLVTEHAQMMQRIKKTETETSLHPLLQEIYKDMY'
+    sequence = 'MARRCGPVALLLGFGLLRLCSGVWGTDTEERLVEHLLDPSRYNKLIRPATNGSELVTVQLMVSLAQLISVHEREQIMTTNVWLTQEWEDYRLTWKPEEFDNMKKVRLPSKHIWLPDVVLYNNADGMYEVSFYSNAVVSYDGSIFWLPPAIYKSACKIEVKHFPFDQQNCTMKFRSWTYDRTEIDLVLKSEVASLDDFTPSGEWDIVALPGRRNENPDDSTYVDITYDFIIRRKPLFYTINLIIPCVLITSLAILVFYLPSDCGEKMTLCISVLLALTVFLLLISKIVPPTSLDVPLVGKYLMFTMVLVTFSIVTSVCVLNVHHRSPTTHTMAPWVKVVFLEKLPALLFMQQPRHHCARQRLRLRRRQREREGAGALFFREAPGADSCTCFVNRASVQGLAGAFGAEPAPVAGPGRSGEPCGCGLREAVDGVRFIADHMRSEDDDQSVSEDWKYVAMVIDRLFLWIFVFVCVFGTIGMFLQPLFQNYTTTTFLHSDHSAPSSK'
     print(len(sequence))
     
-    smile = generate_smiles(model, sequence, max_length=200, temperature=1.0)
+    smile = generate_smiles(model, sequence, fabric, max_length=80, temperature=1.0)
     print(smile)
     print(len(smile))
     
-    some_generated_smiles = generate(100, sequence, max_length=100, 
-                                     temperature=1.0, verbose=False)
+    some_generated_smiles, sucess_rate = generate(100, sequence, fabric, max_length=80, 
+                                                    temperature=1.0, verbose=False)
     print(some_generated_smiles)
     print('Generated SMILES:', len(some_generated_smiles))
+    
+    timef = time.time() - time0
+    print('Time:', timef)
