@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import scipy
 import time
-
+"""
 df = pd.read_csv('../data/data_ChEMBL_BindingDB_Plinder.csv', index_col=0)
 
 # Calculate the sequence lengths of the proteins and the SMILES
@@ -147,4 +147,34 @@ print('Mean SMILES length per source:', mean_smiles_length_per_source)
 print('Median SMILES length per source:', median_smiles_length_per_source)
 print('Mode SMILES length per source:', mode_smiles_length_per_source)
 print('Standard deviation SMILES length per source:', stdev_smiles_length_per_source)
+"""
 
+df = pd.read_csv('../data/data_ChEMBL_BindingDB_Plinder_clean.csv', index_col=0)
+
+# Calculate the number of different proteins and molecules that are present in the dataset
+unique_sequences = df['Sequence'].nunique()
+unique_molecules = df['SMILES'].nunique()
+print('Number of unique sequences:', unique_sequences)
+print('Number of unique molecules:', unique_molecules)
+
+# Count the number of molecules per protein (group by Sequence)
+molecules_per_protein = df.groupby('Sequence')['SMILES'].nunique().reset_index()
+molecules_per_protein.columns = ['Sequence', 'Num_molecules']
+molecules_per_protein = molecules_per_protein.sort_values(by='Num_molecules', ascending=False)
+molecules_per_protein.to_csv('molecules_per_protein.csv')
+print('Number of molecules per protein:\n', molecules_per_protein)
+
+# Calculate the mean, median, mode, and standard deviation of the number of molecules per protein
+mean_molecules_per_protein = molecules_per_protein['Num_molecules'].mean()
+median_molecules_per_protein = molecules_per_protein['Num_molecules'].median()
+mode_molecules_per_protein = mode(molecules_per_protein['Num_molecules'])
+stdev_molecules_per_protein = molecules_per_protein['Num_molecules'].std()
+print('Mean number of molecules per protein:', mean_molecules_per_protein)
+print('Median number of molecules per protein:', median_molecules_per_protein)
+print('Mode number of molecules per protein:', mode_molecules_per_protein)
+print('Standard deviation number of molecules per protein:', stdev_molecules_per_protein)
+
+# Plot the distribution of num. of molecules per protein sequence
+plt.figure()
+sns.histplot(data=molecules_per_protein, bins=50, kde=True)
+plt.savefig('../data/plots/molecules_per_protein_distribution.png')
