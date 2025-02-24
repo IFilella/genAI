@@ -259,7 +259,7 @@ def train_model(prot_seqs,
     # TO DO: Add support for other loss functions and optimizers
     # Loss function
     if loss_function == 'crossentropy':
-        criterion = nn.CrossEntropyLoss(ignore_index=-100)
+        criterion = nn.CrossEntropyLoss(ignore_index=-100, label_smoothing=0.1)
     else:
         raise ValueError('Invalid loss function. Please use "crossentropy"')
 
