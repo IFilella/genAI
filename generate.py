@@ -66,7 +66,7 @@ def generate_smiles(model, sequence, fabric, max_length=50, temperature=1.0, ver
         
     return tokenizer.decode(generated_token_ids, skip_special_tokens=True)
 
-def generate(quantity, sequence, fabric, max_length=50, temperature=1.0, verbose=False, outdir='.'):
+def generate(quantity, sequence, fabric, max_length=50, temperature=1.0, verbose=False, outdir='.', outname='generated_smiles.csv'):
     valid_smiles = []
     for _ in range(quantity):
         generated_smiles = generate_smiles(model, sequence, fabric, max_length, temperature, verbose=verbose)
@@ -83,7 +83,7 @@ def generate(quantity, sequence, fabric, max_length=50, temperature=1.0, verbose
     
     # Save the properties in a dataframe
     df_smiles_props = pd.DataFrame(valid_smiles, columns=['smiles', 'SAscore','QED', 'mw', 'logp', 'tpsa', 'nHD', 'nHA'])
-    df_smiles_props.to_csv('%s/generated_smiles.csv'%outdir, index=False)
+    df_smiles_props.to_csv('%s/%s'%(outdir, outname), index=False)
 
     return df_smiles_props, success_rate
 
