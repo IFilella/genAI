@@ -66,7 +66,7 @@ def generate_smiles(model, sequence, fabric, max_length=50, temperature=1.0, ver
         
     return tokenizer.decode(generated_token_ids, skip_special_tokens=True)
 
-def generate(quantity, sequence, fabric, max_length=50, temperature=1.0, verbose=False, outdir='.', outname='generated_smiles.csv'):
+def generate(quantity, sequence, model, fabric, max_length=50, temperature=1.0, verbose=False, outdir='.', outname='generated_smiles.csv'):
     valid_smiles = []
     for _ in range(quantity):
         generated_smiles = generate_smiles(model, sequence, fabric, max_length, temperature, verbose=verbose)
@@ -125,7 +125,7 @@ if __name__ == '__main__':
     print(smile)
     print(len(smile))
     
-    some_generated_smiles, sucess_rate = generate(100, sequence, fabric, max_length=80, 
+    some_generated_smiles, sucess_rate = generate(100, sequence, model, fabric, max_length=80, 
                                                     temperature=1.0, verbose=False)
     print(some_generated_smiles)
     print('Generated SMILES:', len(some_generated_smiles))
