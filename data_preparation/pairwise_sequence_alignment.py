@@ -34,8 +34,10 @@ def transform_sequences_to_fasta(df_csv, out_file):
     # retrieve the sequence IDs from Plinder
     df_plinder = pd.read_csv('../data/data_Plinder.csv')
     df_filtered_plinder = df[df['source'] == 'Plinder']
-    seq_to_id_plinder = df_plinder.set_index('Sequence')['sequence_id'].to_dict()
-    df_filtered_plinder.loc[:, 'Seq_ID'] = df['Sequence'].map(seq_to_id_plinder)
+    # seq_to_id_plinder = df_plinder.set_index('Sequence')['sequence_id'].to_dict()
+    # df_filtered_plinder.loc[:, 'Seq_ID'] = df['Sequence'].map(seq_to_id_plinder)
+    # because these IDs are not unique, we will assign new IDs
+    df_filtered_plinder.loc[:, 'Seq_ID'] = [f'Plinder_{i}' for i in range(1, len(df_filtered_plinder) + 1)]
     print(df_filtered_plinder)
     
     # Join the dataframes
@@ -49,6 +51,13 @@ def transform_sequences_to_fasta(df_csv, out_file):
         for i, row in df_all.iterrows():
             f.write(f'>{row["Seq_ID"]}\n{row["Sequence"]}\n')
 
+def compute_identity(pair, seqs, aligner):
+        i, j = pair
+        alignment = aligner.align(seqs[i], seqs[j])[0]
+        matches = sum(1 for a,b in zip(alignment[0], alignment[1]) if a == b)
+        identity = matches / max(len(seqs[i]), len(seqs[j]))
+        return i, j, identity
+    
 def pairwise_sequence_alignment(fasta_file, num_cpus, out_file):
 
     sequences = {str(record.seq): record.id for record in SeqIO.parse(fasta_file, 'fasta')}
@@ -60,19 +69,15 @@ def pairwise_sequence_alignment(fasta_file, num_cpus, out_file):
     ids = list(sequences.values())
     seqs = list(sequences.keys())
     n = len(ids)
-            
-    def compute_identity(pair):
-        i, j = pair
-        alignment = aligner.align(seqs[i], seqs[j])[0]
-        matches = sum(1 for a,b in zip(alignment[0], alignment[1]) if a == b)
-        identity = matches / max(len(seqs[i]), len(seqs[j]))
-        return i, j, identity
-        
-    pairs = [(i, j) for i in range(n) for j in range(i, n)]
 
+    pairs = [(i, j) for i in range(n) for j in range(i, n)]
+    
+    from functools import partial
+    compute_identity_partial = partial(compute_identity, seqs=seqs, aligner=aligner)
+    
     num_workers = num_cpus
     with Pool(num_workers) as pool:
-        results = pool.map(compute_identity, pairs)
+        results = pool.map(compute_identity_partial, pairs)
 
     matrix = np.zeros((n, n))
     for i, j, identity in results:
@@ -155,6 +160,28 @@ def plot_tSNE_clusters(seq_sim_matrix, clusters, out_file, perplexity=30, random
     plt.legend(title='Cluster')
     plt.savefig(out_file)
 
+def map_seq_ids_to_fasta(df_ref, df_to_map, out_file):
+    df_ref = pd.read_csv(df_ref, index_col=0)
+    df_to_map = pd.read_csv(df_to_map, index_col=0)
+    
+    # Drop duplicates from validation split
+    print(len(df_to_map))
+    df_to_map = df_to_map.drop_duplicates(subset='Sequence', keep='first')
+    print(len(df_to_map))
+    
+    seq_to_id = df_ref.set_index('Sequence')['Seq_ID'].to_dict()
+    df_to_map.loc[:, 'Seq_ID'] = df_to_map['Sequence'].map(seq_to_id)
+    
+    df_to_map['Seq_ID'] = df_to_map['Seq_ID'].str.replace(' ', '')
+    df_to_map['Sequence'] = df_to_map['Sequence'].str.replace(' ', '')
+    nan = (df_to_map['Seq_ID'] == '')
+    df_to_map.loc[nan, 'Seq_ID'] = [f'val_{i}' for i in range(1, nan.sum() + 1)]
+    df_to_map.to_csv('seq_sim_analysis/tmp_val_dataset.csv')
+    print(df_to_map)
+    
+    with open('%s'%out_file, 'w') as f:
+        for i, row in df_to_map.iterrows():
+            f.write(f'>{row["Seq_ID"]}\n{row["Sequence"]}\n')
 
 if __name__ == '__main__':
     
@@ -172,7 +199,13 @@ if __name__ == '__main__':
     #clusters = cluster_simmatrix_DBSCAN('seq_sim_analysis/sequence_similarity_matrix.csv', 'seq_sim_analysis/DBSCAN_clusters.csv', 0.6, 2)
     
     # Cluster the sequences based on the similarity matrix (Hierarchical)
-    clusters = cluster_simmatrix_hierarchical('seq_sim_analysis/sequence_similarity_matrix.csv', 'seq_sim_analysis/hierarchical_clusters.csv', 0.6)
+    #clusters = cluster_simmatrix_hierarchical('seq_sim_analysis/sequence_similarity_matrix.csv', 'seq_sim_analysis/hierarchical_clusters.csv', 0.6)
     
     # Plot the clusters in a tSNE plot
-    plot_tSNE_clusters('seq_sim_analysis/sequence_similarity_matrix.csv', clusters, '../data/plots/hierarchical_clusters_tsne.png')
+    #plot_tSNE_clusters('seq_sim_analysis/sequence_similarity_matrix.csv', clusters, '../data/plots/hierarchical_clusters_tsne.png')
+    
+    # JUST VALIDATION SPLIT    
+    #map_seq_ids_to_fasta('seq_sim_analysis/tmp_dataset.csv', '../data/splits/validation_split.csv', 'seq_sim_analysis/validation_sequences.fasta')
+    
+    pairwise_sequence_alignment('seq_sim_analysis/validation_sequences.fasta', 10, 'seq_sim_analysis/validation_similarity_matrix.csv')
+    
