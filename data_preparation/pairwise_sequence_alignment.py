@@ -7,8 +7,12 @@ import matplotlib.pyplot as plt
 from multiprocessing import Pool
 from sklearn.cluster import DBSCAN
 from sklearn.manifold import TSNE
+import scipy.cluster.hierarchy as shc
+from scipy.spatial.distance import squareform
+from collections import Counter
 
-def transform_sequences_to_fasta(df, out_file):
+def transform_sequences_to_fasta(df_csv, out_file):
+    df = pd.read_csv(df_csv)
     
     # retrieve the sequence IDs from ChEMBL
     df_chembl = pd.read_csv('../data/data_ChEMBL.csv')
@@ -23,20 +27,22 @@ def transform_sequences_to_fasta(df, out_file):
     df_filtered_bindingdb = df[df['source'] == 'BindingDB']
     seq_to_id_bindingdb = df_bindingdb.set_index('Sequence')['ID'].to_dict()
     df_filtered_bindingdb.loc[:, 'Seq_ID'] = df['Sequence'].map(seq_to_id_bindingdb)
+    nan_indices = df_filtered_bindingdb['Seq_ID'].isna() | (df_filtered_bindingdb['Seq_ID'] == ' ')
+    df_filtered_bindingdb.loc[nan_indices, 'Seq_ID'] = [f'BindingDB_{i}' for i in range(1, nan_indices.sum() + 1)]
     print(df_filtered_bindingdb)
-
+    
     # retrieve the sequence IDs from Plinder
     df_plinder = pd.read_csv('../data/data_Plinder.csv')
     df_filtered_plinder = df[df['source'] == 'Plinder']
     seq_to_id_plinder = df_plinder.set_index('Sequence')['sequence_id'].to_dict()
     df_filtered_plinder.loc[:, 'Seq_ID'] = df['Sequence'].map(seq_to_id_plinder)
     print(df_filtered_plinder)
-
+    
     # Join the dataframes
     df_all = pd.concat([df_filtered_chembl, df_filtered_bindingdb, df_filtered_plinder])
     print(len(df_all))
     df_all.to_csv('seq_sim_analysis/tmp_dataset.csv')
-
+    
     # Save the sequences in a fasta file
     df_all = pd.read_csv('seq_sim_analysis/tmp_dataset.csv')
     with open('%s'%out_file, 'w') as f:
@@ -88,28 +94,54 @@ def clustermap_seq_sim_matrix(seq_sim_matrix, out_file):
 
 def cluster_simmatrix_DBSCAN(seq_sim_matrix, out_file, eps, min_samples):
     df_matrix = pd.read_csv(seq_sim_matrix, index_col=0)
-    print(df_matrix)
 
     distance_matrix = 1 - df_matrix
     distance_array = distance_matrix.values
 
-    dbscan = DBSCAN(eps, min_samples, metric='precomputed')
-    clusters = dbscan.fit_predict(distance_array)
+    dbscan = DBSCAN(eps=eps, min_samples=min_samples, metric='precomputed')
+    clusters = dbscan.fit(distance_array).labels_
+    
+    counts = Counter(clusters)
+    counts_df = pd.DataFrame.from_dict(counts, orient='index').reset_index()
+    print('Number of clusters:', len(counts))
+    print('Cluster sizes:\n', counts_df)
 
-    identity_df = pd.DataFrame(columns=['Seq_ID', 'Cluster'])
-    identity_df['Seq_ID'] = df_matrix.index
-    identity_df["Cluster"] = clusters
-    identity_df.to_csv(out_file)
+    df_clusters = pd.DataFrame(clusters, index=df_matrix.index, columns=['Cluster'])
+    df_clusters.to_csv(out_file)
 
-    print(identity_df)
-    print(identity_df['Cluster'].value_counts())
+    return clusters
+
+def cluster_simmatrix_hierarchical(seq_sim_matrix, out_file, max_dist):
+    df_matrix = pd.read_csv(seq_sim_matrix, index_col=0)
+
+    distance_matrix = 1 - df_matrix
+    distance_array = distance_matrix.values
+
+    linkage_matrix = shc.linkage(squareform(distance_array), method='average')
+    
+    plt.figure(figsize=(50, 10))
+    shc.dendrogram(linkage_matrix, labels=df_matrix.index, leaf_rotation=90)
+    plt.axhline(y=max_dist, color='r', linestyle='--')
+    plt.xlabel('Protein Sequence')
+    plt.ylabel('Distance')
+    plt.title('Hierarchical Clustering of Protein Sequences')
+    plt.savefig('../data/plots/hierarchical_clustering.png')
+    
+    threshold = max_dist
+    clusters = shc.fcluster(linkage_matrix, threshold, criterion='distance')
+    counts = Counter(clusters)
+    counts_df = pd.DataFrame.from_dict(counts, orient='index').reset_index()
+    
+    print('Number of clusters:', len(counts))
+    print('Cluster sizes:\n', counts_df)
+    
+    df_clusters = pd.DataFrame(clusters, index=df_matrix.index, columns=['Cluster'])
+    df_clusters.to_csv(out_file)
     
     return clusters
 
 def plot_tSNE_clusters(seq_sim_matrix, clusters, out_file, perplexity=30, random_state=42):
     df_matrix = pd.read_csv(seq_sim_matrix, index_col=0)
-    print(df_matrix)
-
     distance_matrix = 1 - df_matrix
 
     tsne = TSNE(n_components=2, perplexity=perplexity, random_state=random_state)
@@ -126,21 +158,21 @@ def plot_tSNE_clusters(seq_sim_matrix, clusters, out_file, perplexity=30, random
 
 if __name__ == '__main__':
     
-    # Load dataset
-    df = pd.read_csv('../data/data_ChEMBL_BindingDB_Plinder_clean.csv', index_col=0)
-    print(len(df))
-    
+    # ALL DATASET
     # First, transform the sequences into a fasta file
-    transform_sequences_to_fasta(df, 'seq_sim_analysis/dataset_sequences.fasta')
+    #transform_sequences_to_fasta('../data/data_ChEMBL_BindingDB_Plinder_clean.csv', 'seq_sim_analysis/dataset_sequences.fasta')
     
     # Pairwise sequence alignment of the fasta file
-    pairwise_sequence_alignment('seq_sim_analysis/dataset_sequences.fasta', 10, 'seq_sim_analysis/sequence_similarity_matrix.csv')
+    #pairwise_sequence_alignment('seq_sim_analysis/dataset_sequences.fasta', 10, 'seq_sim_analysis/sequence_similarity_matrix.csv')
     
     # Plot a clustermap of the similarity matrix
-    clustermap_seq_sim_matrix('seq_sim_analysis/sequence_similarity_matrix.csv', '../data/plots/sequence_similarity_matrix_clustermap.png')
+    #clustermap_seq_sim_matrix('seq_sim_analysis/sequence_similarity_matrix.csv', '../data/plots/sequence_similarity_matrix_clustermap.png')
     
     # Cluster the sequences based on the similarity matrix (DBSCAN)
-    clusters = cluster_simmatrix_DBSCAN('seq_sim_analysis/sequence_similarity_matrix.csv', 'seq_sim_analysis/DBSCAN_clusters.csv', 0.7, 2)
+    #clusters = cluster_simmatrix_DBSCAN('seq_sim_analysis/sequence_similarity_matrix.csv', 'seq_sim_analysis/DBSCAN_clusters.csv', 0.6, 2)
+    
+    # Cluster the sequences based on the similarity matrix (Hierarchical)
+    clusters = cluster_simmatrix_hierarchical('seq_sim_analysis/sequence_similarity_matrix.csv', 'seq_sim_analysis/hierarchical_clusters.csv', 0.6)
     
     # Plot the clusters in a tSNE plot
-    plot_tSNE_clusters('seq_sim_analysis/sequence_similarity_matrix.csv', clusters, '../data/plots/DBSCAN_clusters_tsne.png')
+    plot_tSNE_clusters('seq_sim_analysis/sequence_similarity_matrix.csv', clusters, '../data/plots/hierarchical_clusters_tsne.png')
