@@ -209,3 +209,5 @@ if __name__ == '__main__':
     
     pairwise_sequence_alignment('seq_sim_analysis/validation_sequences.fasta', 10, 'seq_sim_analysis/validation_similarity_matrix.csv')
     
+    clustermap_seq_sim_matrix('seq_sim_analysis/validation_similarity_matrix.csv', '../data/plots/validation_similarity_matrix_clustermap.png')
+    
