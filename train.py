@@ -14,6 +14,8 @@ from torchinfo import summary
 import pandas as pd
 import argparse
 import wandb
+import math
+import random
 
 def set_seed(seed):
     torch.manual_seed(seed)
@@ -33,7 +35,7 @@ def train_epoch(model, dataloader, criterion, optimizer, tokenizer, fabric, verb
     for i, batch in enumerate(dataloader):
         
         if verbose >= 1 and fabric.is_global_zero:
-            print(f"\tE.Batch {i+1} of {len(dataloader)} with size {batch['input_ids'].shape[0]}")
+            fabric.print(f"\tT.E.Batch {i+1} of {len(dataloader)} with size {batch['input_ids'].shape[0]}")
             
         input_tensor = batch['input_ids']
         input_att_mask = batch['attention_mask']
@@ -76,6 +78,95 @@ def train_epoch(model, dataloader, criterion, optimizer, tokenizer, fabric, verb
     
     return avg_train_loss, train_acc
 
+def scheduled_sampling_prob(epoch, k):
+    """Scheduled sampling probability.
+       This is an Inverse Sigmoid Decay Strategy, because it is smoother.
+       
+       k = decay factor (higher k, faster decay)"""
+       
+    return k / (k + math.exp(epoch / k))
+
+def train_epoch_scheduled_sampling(model, dataloader, criterion, optimizer, tokenizer, fabric, epoch, k, verbose=1):
+    """Train the model for one epoch with scheduled sampling."""
+
+    model.train()
+
+    total_train_loss = 0
+    total_train_correct = 0
+    total_train_samples = 0
+
+    p = scheduled_sampling_prob(epoch, k)
+
+    for i, batch in enumerate(dataloader):
+        
+        if verbose >= 1 and fabric.is_global_zero:
+            fabric.print(f"\tT.E.Batch {i+1} of {len(dataloader)} with size {batch['input_ids'].shape[0]}")
+            
+        input_tensor = batch['input_ids']
+        input_att_mask = batch['attention_mask']
+        labels = batch['labels']
+
+        batch_size, seq_length = labels.shape
+        
+        use_teacher_forcing = torch.rand(1).item() < p # Generates a random number in [0, 1)
+        
+        if verbose >= 2 and fabric.is_global_zero:
+            fabric.print(f"\t\tUse teacher forcing: {use_teacher_forcing}, Scheduled Sampling Probability: {p:.4f}")
+        
+        if use_teacher_forcing:
+            # Standard teacher forcing: use ground-truth tokens as input
+            logits = model(input_tensor, input_att_mask, tokenizer.delim_token_id, fabric)
+            logits = logits.contiguous().view(-1, logits.size(-1))
+
+        else:
+            # Autoregressive mode (no teacher forcing)
+            pad_id = tokenizer.prot_tokenizer.pad_token_id
+            delim_idx = (input_tensor[0] == tokenizer.delim_token_id).nonzero().item()
+
+            input_decoder = input_tensor[:, :delim_idx + 1]  # Start with prefix (protein + <del>)
+            input_decoder = fabric.to_device(input_decoder)
+
+            predicted_tokens = []
+
+            max_len = seq_length - delim_idx  # Generate only molecule sequence
+
+            for _ in range(max_len):
+                input_att_mask = (input_decoder == pad_id)
+                input_att_mask = fabric.to_device(input_att_mask)
+                logits = model(input_decoder, input_att_mask, tokenizer.delim_token_id, fabric)
+
+                pred_token = logits[:, -1, :].argmax(dim=-1).unsqueeze(1)  # Get predicted token
+                predicted_tokens.append(pred_token)
+                input_decoder = torch.cat((input_decoder, pred_token), dim=1)  # Append prediction
+
+            logits = logits.view(-1, logits.shape[-1])  # Reshape for loss calculation
+
+        # Compute loss
+        labels = labels.contiguous().view(-1)
+        loss = criterion(logits, labels)
+        total_train_loss += loss.item()
+
+        # Backward pass and optimization
+        fabric.backward(loss)
+        optimizer.step()
+        optimizer.zero_grad(set_to_none=True)  # Free memory
+
+        # Accuracy computation (ignoring padding)
+        delim_idx = (input_tensor[0] == tokenizer.delim_token_id).nonzero().item()
+        _, preds = torch.max(logits, dim=1)
+        preds = preds.reshape(batch_size, seq_length)[:, delim_idx:]  # Ignore prefix
+        labels = labels.reshape(batch_size, seq_length)[:, delim_idx:]  # Ignore prefix
+        labels[labels == -100] = 1  # Ignore loss-padding
+
+        total_train_correct += (preds == labels).sum().item()
+        total_train_samples += labels.numel()
+        
+    avg_train_loss = total_train_loss / len(dataloader)
+    train_acc = total_train_correct / total_train_samples
+    
+    return avg_train_loss, train_acc
+
+
 def evaluate_epoch(model, dataloader, criterion, tokenizer, fabric, verbose=1):
     """Evaluate the model for one epoch."""
 
@@ -91,7 +182,7 @@ def evaluate_epoch(model, dataloader, criterion, tokenizer, fabric, verbose=1):
         for i, batch in enumerate(dataloader):
             
             if verbose >= 1 and fabric.is_global_zero:
-                print(f"\tE.Batch {i+1} of {len(dataloader)} with size {batch['input_ids'].shape[0]}")
+                fabric.print(f"\tV.E.Batch {i+1} of {len(dataloader)} with size {batch['input_ids'].shape[0]}")
                 
             input_tensor = batch['input_ids']
             labels = batch['labels']
@@ -264,7 +355,6 @@ def train_model(prot_seqs,
         raise ValueError('Invalid loss function. Please use "crossentropy"')
 
     # Optimizer
-    print(optimizer)
     if optimizer == 'Adam':
         if weight_decay:
             optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
@@ -299,9 +389,15 @@ def train_model(prot_seqs,
             timer_train = Timer(autoreset=True)
             timer_train.start('Train Epoch %d/%d'%(epoch+1, num_epochs))
         
-        avg_train_loss, train_acc = train_epoch(model, train_dataloader,
-                                                criterion, optimizer,
-                                                tokenizer, fabric)
+        # avg_train_loss, train_acc = train_epoch(model, train_dataloader,
+        #                                         criterion, optimizer,
+        #                                         tokenizer, fabric, verbose)
+        
+        avg_train_loss, train_acc = train_epoch_scheduled_sampling(model, train_dataloader,
+                                                                criterion, optimizer,
+                                                                tokenizer, fabric,
+                                                                epoch, 10, verbose)
+        
         avg_train_acc = fabric.all_reduce(train_acc, reduce_op='mean')
         
         if verbose >=2 and fabric.is_global_zero:
@@ -314,7 +410,7 @@ def train_model(prot_seqs,
         
         avg_val_loss, val_acc, other_metrics = evaluate_epoch(model, val_dataloader,
                                                               criterion, tokenizer,
-                                                              fabric)
+                                                              fabric, verbose)
         avg_val_acc = fabric.all_reduce(val_acc, reduce_op='mean')
         
         if verbose >=2 and fabric.is_global_zero:
