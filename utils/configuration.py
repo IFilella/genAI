@@ -39,7 +39,8 @@ def load_config(config_path):
         'mol_max_length': config['mol_max_length'],
         'es_patience': config['es_patience'],
         'es_delta': config['es_delta'],
-        'seed': config['seed']
+        'seed': config['seed'],
+        'resume_training': config['resume_training']
     }
     
     # Add configuration for wandb if enabled

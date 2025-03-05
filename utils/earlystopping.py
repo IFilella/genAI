@@ -10,7 +10,7 @@ class EarlyStopping:
         self.early_stop = False
         self.verbose = verbose
         
-    def __call__(self, score, model, weights_path, fabric):
+    def __call__(self, score, model, weights_path, epoch, optimizer, fabric):
 
         if self.best_score - score > self.delta:
             if self.verbose >= 1:
@@ -18,7 +18,7 @@ class EarlyStopping:
                             'Stopping counter to 0.')
             self.best_score = score
             self.counter = 0
-            self.save_checkpoint(model, weights_path, fabric)
+            self.save_checkpoint(model, weights_path, epoch, optimizer, fabric)
         else:
             self.counter += 1
             if self.verbose >= 1:
@@ -26,8 +26,12 @@ class EarlyStopping:
             if self.counter >= self.patience:
                 self.early_stop = True
     
-    def save_checkpoint(self, model, weights_path, fabric):
-        state = {'model': model}
+    def save_checkpoint(self, model, weights_path, epoch, optimizer, fabric):
+        state = {
+            'model': model,
+            'epoch': epoch,
+            'optimizer': optimizer,
+            }
         fabric.save(weights_path, state)
 
 if __name__ == '__main__':

@@ -15,7 +15,7 @@ import pandas as pd
 import argparse
 import wandb
 import math
-import random
+import os
 
 def set_seed(seed):
     torch.manual_seed(seed)
@@ -274,7 +274,8 @@ def train_model(prot_seqs,
                 mol_max_length=80,
                 patience=5,
                 delta=0,
-                seed=1234
+                seed=1234,
+                resume_training=False
                 ):
 
     """
@@ -308,6 +309,7 @@ def train_model(prot_seqs,
         patience (int, optional): The number of epochs to wait before early stopping. Defaults to 5.
         delta (int, optional): The minimum change in validation loss to qualify as an improvement. Defaults to 0.
         seed (int, optional): The random seed. Defaults to 1234.
+        resume_training (bool, optional): Whether to resume training from a checkpoint. Defaults to False.
     """
     fabric = Fabric(accelerator='cuda', devices=num_gpus, num_nodes=1, strategy='ddp', precision="bf16-mixed")
     fabric.launch()
@@ -373,13 +375,27 @@ def train_model(prot_seqs,
     train_dataloader = fabric.setup_dataloaders(train_dataloader, use_distributed_sampler=False)
     val_dataloader = fabric.setup_dataloaders(val_dataloader, use_distributed_sampler=False)
 
+    # Check if a checkpoint exists
+    start_epoch = 0
+    if resume_training and os.path.exists(weights_path):
+        checkpoint = fabric.load(weights_path)
+        model.load_state_dict(checkpoint['model'])
+        optimizer.load_state_dict(checkpoint['optimizer'])
+        start_epoch = checkpoint['epoch'] + 1 # Start from the next epoch
+        
+        if verbose >=0:
+            fabric.print(f"Resuming training from epoch {start_epoch}")
+        
     # Start the training loop
     if verbose >=0:
         fabric.print('Starting the training loop...')
+    
     early_stopping = EarlyStopping(patience=patience, delta=delta, verbose=verbose)
 
-    for epoch in range(num_epochs):
-        
+    for epoch in range(start_epoch, num_epochs):
+        if verbose >=0:
+            fabric.print(f"\nEPOCH {epoch+1}/{num_epochs}")
+            
         if verbose >=2 and fabric.is_global_zero:
             timer_epoch = Timer(autoreset=True)
             timer_epoch.start('Epoch %d/%d'%(epoch+1, num_epochs))
@@ -437,7 +453,7 @@ def train_model(prot_seqs,
                         "Validation F1": other_metrics['f1']})
         
         # Early stopping based on validation loss
-        early_stopping(avg_val_loss, model, weights_path, fabric)
+        early_stopping(avg_val_loss, model, weights_path, epoch, optimizer, fabric)
 
         if early_stopping.early_stop:
             if verbose >=0:
@@ -482,6 +498,7 @@ def main():
     
     # Get the data
     df = pd.read_csv(config['data_path'])
+    df = df.sample(n=1000)
     prots = df[config['col_prots']].tolist()
     mols = df[config['col_mols']].tolist()
 
@@ -494,7 +511,8 @@ def main():
                 config['wandb']['wandb_config'], config['wandb']['wandb_name'],
                 config['validation_split'], config['num_gpus'], config['verbose'],
                 config['prot_max_length'], config['mol_max_length'],
-                config['es_patience'], config['es_delta'], config['seed'])
+                config['es_patience'], config['es_delta'], config['seed'],
+                config['resume_training'])
 
     timer_total.stop()
 
