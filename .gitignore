@@ -10,6 +10,7 @@ utils/__pycache__/
 configs/
 runs/
 tests/test_generation/
+tests/test_generation_smooth/
 data_preparation/seq_sim_analysis/
 *.png
 *.json
