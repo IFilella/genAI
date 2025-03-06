@@ -309,19 +309,33 @@ def train_model(prot_seqs,
         patience (int, optional): The number of epochs to wait before early stopping. Defaults to 5.
         delta (int, optional): The minimum change in validation loss to qualify as an improvement. Defaults to 0.
         seed (int, optional): The random seed. Defaults to 1234.
-        resume_training (bool, optional): Whether to resume training from a checkpoint. Defaults to False.
+        resume_training (bool, optional): Whether to resume training from a checkpoint. Defaults to False. If true,
+                                            the name of the wandb run should be provided.
     """
     fabric = Fabric(accelerator='cuda', devices=num_gpus, num_nodes=1, strategy='ddp', precision="bf16-mixed")
     fabric.launch()
     fabric.seed_everything(seed, workers=True)
 
     if get_wandb and fabric.is_global_zero:
+        if resume_training:
+            wandb_run_id = open(f'wandb/{resume_training}.txt').read().strip()
+            wandb.init(
+                project=wandb_project,
+                config=wandb_config,
+                name=wandb_name,
+                id=wandb_run_id,
+                resume="must"
+            )
+            fabric.print(f"Resuming wandb run {wandb_run_id}")
+        else:
             wandb.init(
                 project=wandb_project,
                 config=wandb_config,
                 name=wandb_name
             )
-
+            with open(f'wandb/{wandb_name}.txt', 'w') as f:
+                f.write(wandb.run.id)
+    
     # Tokenizer initialization
     tokenizer = Tokenizer()
     vocab_size = tokenizer.vocab_size
