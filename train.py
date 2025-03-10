@@ -161,6 +161,8 @@ def train_epoch_scheduled_sampling(model, dataloader, criterion, optimizer, toke
         total_train_correct += (preds == labels).sum().item()
         total_train_samples += labels.numel()
         
+        fabric.barrier()
+        
     avg_train_loss = total_train_loss / len(dataloader)
     train_acc = total_train_correct / total_train_samples
     
@@ -484,6 +486,8 @@ def train_model(prot_seqs,
                 if fabric.is_global_zero:
                     memory.get_CPU_memory()
                     
+        fabric.barrier()
+        
     if verbose >=0:
         fabric.print('Training complete!')
 
@@ -512,7 +516,6 @@ def main():
     
     # Get the data
     df = pd.read_csv(config['data_path'])
-    df = df.sample(n=1000)
     prots = df[config['col_prots']].tolist()
     mols = df[config['col_mols']].tolist()
 
