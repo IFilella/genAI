@@ -78,13 +78,22 @@ def train_epoch(model, dataloader, criterion, optimizer, tokenizer, fabric, verb
     
     return avg_train_loss, train_acc
 
-def scheduled_sampling_prob(epoch, k):
+def scheduled_sampling_prob_invsig(epoch, k):
     """Scheduled sampling probability.
        This is an Inverse Sigmoid Decay Strategy, because it is smoother.
        
        k = decay factor (higher k, faster decay)"""
        
     return k / (k + math.exp(epoch / k))
+
+
+def scheduled_sampling_prob_lin(epoch):
+    """Scheduled sampling probability.
+    This is a Linear decay strategy, but adapted to our specific training."""
+    
+    y = -(0.9/12) * epoch + 0.9
+    
+    return y
 
 def train_epoch_scheduled_sampling(model, dataloader, criterion, optimizer, tokenizer, fabric, epoch, k, verbose=1):
     """Train the model for one epoch with scheduled sampling."""
@@ -95,7 +104,7 @@ def train_epoch_scheduled_sampling(model, dataloader, criterion, optimizer, toke
     total_train_correct = 0
     total_train_samples = 0
 
-    p = scheduled_sampling_prob(epoch, k)
+    p = scheduled_sampling_prob_lin(epoch)
 
     for i, batch in enumerate(dataloader):
         
