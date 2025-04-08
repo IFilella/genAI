@@ -46,6 +46,7 @@ mol_max_length: 80
 es_patience: 6
 es_delta: 0.0001
 seed: 1234
+checkpoint_epoch: False
 resume_training: False
 
 EOL

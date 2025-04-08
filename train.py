@@ -286,6 +286,7 @@ def train_model(prot_seqs,
                 patience=5,
                 delta=0,
                 seed=1234,
+                checkpoint_epoch=False,
                 resume_training=False
                 ):
 
@@ -320,6 +321,8 @@ def train_model(prot_seqs,
         patience (int, optional): The number of epochs to wait before early stopping. Defaults to 5.
         delta (int, optional): The minimum change in validation loss to qualify as an improvement. Defaults to 0.
         seed (int, optional): The random seed. Defaults to 1234.
+        checkpoint_epoch(bool, optional): Whether to save a checkpoint per epoch if True, or overwrite and save the
+                                            last epoch checkpoint if False. Defaults to False.
         resume_training (bool, optional): Whether to resume training from a checkpoint. Defaults to False. If true,
                                             the name of the wandb run should be provided.
     """
@@ -478,7 +481,7 @@ def train_model(prot_seqs,
                         "Validation F1": other_metrics['f1']})
         
         # Early stopping based on validation loss
-        early_stopping(avg_val_loss, model, weights_path, epoch, optimizer, fabric)
+        early_stopping(avg_val_loss, model, weights_path, epoch, optimizer, fabric, checkpoint_epoch)
 
         if early_stopping.early_stop:
             if verbose >=0:
@@ -538,7 +541,7 @@ def main():
                 config['validation_split'], config['num_gpus'], config['verbose'],
                 config['prot_max_length'], config['mol_max_length'],
                 config['es_patience'], config['es_delta'], config['seed'],
-                config['resume_training'])
+                config['checkpoint_epoch'], config['resume_training'])
 
     timer_total.stop()
 

@@ -40,6 +40,7 @@ def load_config(config_path):
         'es_patience': config['es_patience'],
         'es_delta': config['es_delta'],
         'seed': config['seed'],
+        'checkpoint_epoch': config['checkpoint_epoch'],
         'resume_training': config['resume_training']
     }
     
