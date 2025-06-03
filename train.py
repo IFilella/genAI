@@ -349,7 +349,7 @@ def train_model(prot_seqs,
             )
             with open(f'wandb/{wandb_name}.txt', 'w') as f:
                 f.write(wandb.run.id)
-    
+
     # Tokenizer initialization
     tokenizer = Tokenizer()
     vocab_size = tokenizer.vocab_size
@@ -363,7 +363,7 @@ def train_model(prot_seqs,
     # Model
     if verbose >=0:
         fabric.print('Initializing the model...')
-        
+
     model = MultiLayerTransformerDecoder(vocab_size, d_model, num_heads,
                                          ff_hidden_layer, dropout, num_layers)
     model = fabric.to_device(model)
@@ -410,20 +410,24 @@ def train_model(prot_seqs,
         model.load_state_dict(checkpoint['model'])
         optimizer.load_state_dict(checkpoint['optimizer'])
         start_epoch = checkpoint['epoch'] + 1 # Start from the next epoch
-        
+
         if verbose >=0:
             fabric.print(f"Resuming training from epoch {start_epoch}")
-        
+
     # Start the training loop
     if verbose >=0:
         fabric.print('Starting the training loop...')
-    
+
     early_stopping = EarlyStopping(patience=patience, delta=delta, verbose=verbose)
 
+    if fabric.is_global_zero and not resume_training:
+        with open(f'metrics/train_dm{d_model}_nh{num_heads}_ff{ff_hidden_layer}_nl{num_layers}.csv', 'w') as f:
+            f.write('Epoch,T_loss,T_acc,V_loss,V_acc,Pre,Rec,F1\n')
+            
     for epoch in range(start_epoch, num_epochs):
         if verbose >=0:
             fabric.print(f"\nEPOCH {epoch+1}/{num_epochs}")
-            
+
         if verbose >=2 and fabric.is_global_zero:
             timer_epoch = Timer(autoreset=True)
             timer_epoch.start('Epoch %d/%d'%(epoch+1, num_epochs))
@@ -432,34 +436,41 @@ def train_model(prot_seqs,
         if verbose >=2 and fabric.is_global_zero:
             timer_train = Timer(autoreset=True)
             timer_train.start('Train Epoch %d/%d'%(epoch+1, num_epochs))
-        
+
         # avg_train_loss, train_acc = train_epoch(model, train_dataloader,
         #                                         criterion, optimizer,
         #                                         tokenizer, fabric, verbose)
-        
+
         avg_train_loss, train_acc = train_epoch_scheduled_sampling(model, train_dataloader,
                                                                 criterion, optimizer,
                                                                 tokenizer, fabric,
                                                                 epoch, 10, verbose)
-        
+
         avg_train_acc = fabric.all_reduce(train_acc, reduce_op='mean')
-        
+
         if verbose >=2 and fabric.is_global_zero:
             timer_train.stop()
-        
+
         # validation
         if verbose >=2 and fabric.is_global_zero:
             timer_val = Timer(autoreset=True)
             timer_val.start('Validation Epoch %d/%d'%(epoch+1, num_epochs))
-        
+
         avg_val_loss, val_acc, other_metrics = evaluate_epoch(model, val_dataloader,
                                                               criterion, tokenizer,
                                                               fabric, verbose)
         avg_val_acc = fabric.all_reduce(val_acc, reduce_op='mean')
-        
+
         if verbose >=2 and fabric.is_global_zero:
             timer_val.stop()
-        
+
+        # Save the metrics into a csv
+        if fabric.is_global_zero:
+            with open(f'metrics/train_dm{d_model}_nh{num_heads}_ff{ff_hidden_layer}_nl{num_layers}.csv', 'a') as f:
+                f.write(
+                    f"{epoch + 1},{avg_train_loss},{avg_train_acc},{avg_val_loss},{avg_val_acc},{other_metrics['precision']},{other_metrics['recall']},{other_metrics['f1']}\n"
+                )
+
         # Print the metrics
         if verbose >=1:
             fabric.print(f"Epoch {epoch+1}/{num_epochs}, "\
@@ -479,7 +490,7 @@ def train_model(prot_seqs,
                         "Validation Precision": other_metrics['precision'],
                         "Validation Recall": other_metrics['recall'],
                         "Validation F1": other_metrics['f1']})
-        
+
         # Early stopping based on validation loss
         early_stopping(avg_val_loss, model, weights_path, epoch, optimizer, fabric, checkpoint_epoch)
 
@@ -487,22 +498,21 @@ def train_model(prot_seqs,
             if verbose >=0:
                 fabric.print(f"Early stopping after {epoch+1} epochs.")
             break
-        
+
         if verbose >=2 and fabric.is_global_zero:
             timer_epoch.stop()
-        
+
         if verbose >=2:
             for rank in range(fabric.world_size):
                 if fabric.global_rank == rank:
                     memory.get_GPU_memory(device=rank)
                 if fabric.is_global_zero:
                     memory.get_CPU_memory()
-                    
+
         fabric.barrier()
-        
+
     if verbose >=0:
         fabric.print('Training complete!')
-
 
 def parse_args():
     """Parse the command-line arguments."""

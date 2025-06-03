@@ -9,8 +9,10 @@ logs/
 utils/__pycache__/
 configs/
 runs/
+metrics/
 tests/test_generation/
 tests/test_generation_smooth/
+tests/test_generation_sched/
 data_preparation/seq_sim_analysis/
 *.png
 *.json
