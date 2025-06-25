@@ -3,6 +3,7 @@ from collections import Counter
 from itertools import chain
 from transformers import AutoTokenizer
 import json
+import re
 
 #prot_vocab = "ACDEFGHIKLMNPQRSTVWY"
 #mol_vocab = "CNOHPSFIKLBcnohpsfikl1234567890#=@[]()/\\-+"
@@ -28,12 +29,22 @@ class MolecularTokenizer:
         self.eos_token = '<eos>'
         self.unk_token = '<unk>'
         self.special_tokens = [self.cls_token, self.pad_token, self.eos_token, self.unk_token]
+        self.regex = '(Br|Cl|Al|Ba|Ar|As|Au|Ba|Be|Bi|Ca|Cd|Ce|Co|Cr|Cu|Fe|Ga|Gd|Hg|La|Li|Mg|Mn|Mo|Na|Nb|Ni|Pd|Pt|Rb|Re|Ru|Sb|Sc|Se|Si|Sn|Sr|Ta|Tb|Tc|Te|Ti|U|V|W|Y|Yb|Zn|se|te|B|N|O|S|P|F|I|K|b|c|n|o|s|p|\\(|\\)|\\[|\\]|\\.|=|\n#|-|\\+|\\\\|\\/|:|~|@@|@|\\?|>>?|\\*|\\$|\\%|[0-9])'
         self.build_vocab()
         
     def build_vocab(self):
-        # Fixed vocabulary for molecular SMILES
-        mol_vocab = "CNOHPSFIKLBcnohpsfikl1234567890#=@[]()/\\-+'"
-        self.vocab = self.special_tokens + list(mol_vocab) # Add special tokens to the vocab
+        # Fixed vocabulary for molecular SMILES, 88 tokens
+        chemical_tokens = [
+            '%', '(', ')', '*', '+', '-', '.', '/', '0', '1', '2', '3', '4', '5',\
+            '6', '7', '8', '9', ':', '=', '@', '@@', 'Al', 'Ar', 'As', 'Au', 'B',\
+            'Ba', 'Be', 'Bi', 'Br', 'Ca', 'Cd', 'Ce', 'Cl', 'Co', 'Cr', 'Cu', 'F',\
+            'Fe', 'Ga', 'Gd', 'Hg', 'I', 'K', 'La', 'Li', 'Mg', 'Mn', 'Mo', 'N',\
+            'Na', 'Nb', 'Ni', 'O', 'P', 'Pd', 'Pt', 'Rb', 'Re', 'Ru', 'S', 'Sb',\
+            'Sc', 'Se', 'Si', 'Sn', 'Sr', 'Ta', 'Tb', 'Tc', 'Te', 'Ti', 'U', 'V',\
+            'W', 'Y', 'Zn', '[', '\\', ']', 'b', 'c', 'n', 'o', 's', 'se', 'te'
+        ]
+        
+        self.vocab = self.special_tokens + chemical_tokens
         self.vocab_size = len(self.vocab)
 
         # Create token2id and id2token mappings
@@ -62,8 +73,10 @@ class MolecularTokenizer:
         longest = min(int(max(len(m) for m in molecule_list)), max_length)
         
         for molecule in molecule_list:
-            tokens = [x for x in molecule]
-                
+            
+            regex = re.compile(self.regex)
+            tokens = re.findall(regex, molecule)
+            
             if truncation and len(tokens) > max_length - 2: # -2 to make space for cls and eos tokens
                 tokens = tokens[:max_length - 2]
             
@@ -95,7 +108,7 @@ class MolecularTokenizer:
         
         if skip_special_tokens:
             tokens = [token for token in tokens if token not in self.special_tokens]
- 
+
         return ''.join(tokens)
 
 class ProteinTokenizer():
@@ -172,7 +185,7 @@ class ProteinTokenizer():
         
         if skip_special_tokens:
             tokens = [token for token in tokens if token not in self.special_tokens]
- 
+
         return ''.join(tokens)
 
 class Tokenizer:
