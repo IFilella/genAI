@@ -15,6 +15,7 @@ import pandas as pd
 import argparse
 import wandb
 import math
+import glob
 import os
 
 def set_seed(seed):
@@ -403,7 +404,12 @@ def train_model(prot_seqs,
     train_dataloader = fabric.setup_dataloaders(train_dataloader, use_distributed_sampler=False)
     val_dataloader = fabric.setup_dataloaders(val_dataloader, use_distributed_sampler=False)
 
-    # Check if a checkpoint exists
+    # Check if a checkpoint exists and define starting epoch
+    if resume_training and checkpoint_epoch:
+        weights_files = glob.glob(weights_path.replace('.pth', '_epoch_*.pth'))
+        weights_files.sort(key=lambda x: int(x.split('_epoch_')[1].split('.')[0]))
+        weights_path = weights_files[-1]
+    
     start_epoch = 0
     if resume_training and os.path.exists(weights_path):
         checkpoint = fabric.load(weights_path)
