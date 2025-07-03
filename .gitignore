@@ -10,10 +10,10 @@ utils/__pycache__/
 configs/
 runs/
 metrics/
-tests/test_generation/
-tests/test_generation_smooth/
-tests/test_generation_sched/
+tests/
 data_preparation/seq_sim_analysis/
+data_preparation/cluter_mmseqs_SMPBind/
+data_preparation/*.csv
 *.png
 *.json
 *.gv

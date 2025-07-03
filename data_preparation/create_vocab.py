@@ -6,7 +6,7 @@ from collections import Counter
 
 regex = '(Br?|Cl?|Al|Ba|Ar|As|Au|Ba|Be|Bi|Ca|Cd|Ce|Co|Cr|Cu|Fe|Ga|Gd|Hg|La|Li|Mg|Mn|Mo|Na|Nb|Ni|Pd|Pt|Rb|Re|Ru|Sb|Sc|Se|Si|Sn|Sr|Ta|Tb|Tc|Te|Ti|U|V|W|Y|Yb|Zn|se|te|B|N|O|S|P|F|I|K|b|c|n|o|s|p|\\(|\\)|\\[|\\]|\\.|=|\n#|-|\\+|\\\\|\\/|:|~|@@|@|\\?|>>?|\\*|\\$|\\%|[0-9])'
 regex = '(\\[[^\\]]+]|Br?|Cl?|N|O|S|P|F|I|b|c|n|o|s|p|\\(|\\)|\\.|=|\n#|-|\\+|\\\\|\\/|:|~|@|\\?|>>?|\\*|\\$|\\%[0-9]{2}|[0-9])'
-regex = '(Br?|Cl?|As|Sb|Se|Si|Sn|Te|H|N|O|S|P|F|I|b|c|n|o|s|p|\\(|\\)|\\[|\\]|\\.|=|\n#|-|\\+|\\\\|\\/|:|~|@@|@|\\?|>>?|\\*|\\$|\\%[0-9]{2}|[0-9])'
+regex = '(Br?|Cl?|As|Sb|Se|Si|Sn|Te|H|N|O|S|P|F|I|b|c|n|o|s|p|\\(|\\)|\\[|\\]|\\.|\\=|\\#|\\-|\\+|\\\\|\\/|\\:|\\~|@@|@|\\?|>>?|\\*|\\$|\\%[0-9]{2}|[0-9])'
 regex = re.compile(regex)
 
 def create_vocab(smiles):
@@ -54,7 +54,7 @@ def extract_atom(token):
 
 def count_atoms_dataset(smiles):
     tokenizer = re.compile(
-    r'(\[[^\]]+\]|Br?|Cl?|N|O|S|P|F|I|B|C|b|c|n|o|s|p|\(|\)|\.|=|#|-|\+|\\\\|/|:|~|@|\?|>>?|\*|\$|%[0-9]{2}|[0-9])'
+    r'(\[[^\]]+\]|Br?|Cl?|N|O|S|P|F|I|B|C|b|c|n|o|s|p|\(|\)|\.|\=|\#|\-|\+|\\\\|\/|\:|\~|\@|\?|>>?|\*|\$|\%[0-9]{2}|[0-9])'
 )
     
     atom_counts = Counter()
@@ -64,9 +64,6 @@ def count_atoms_dataset(smiles):
         for token in tokens:
             if token.startswith('['):
                 atom = extract_atom(token)
-                if atom == 'Hg':
-                    print(f"Found Si in SMILES: {smi}")
-                    exit()
             else:
                 atom = token
             if atom in valid_atoms:
@@ -84,7 +81,7 @@ if __name__ == '__main__':
     # token_counts_df = pd.DataFrame(list(token_counts.items()), columns=['token', 'count'])
     # token_counts_df = token_counts_df.sort_values(by='count', ascending=False)
     # print(token_counts_df)
-    # token_counts_df.to_csv('token_counts.csv', index=False)
+    # token_counts_df.to_csv('token_counts_new.csv', index=False)
     
     # Count the atoms in the dataset
     # atom_counts = count_atoms_dataset(smiles)

@@ -89,6 +89,7 @@ df_clean = df[['Sequence', 'SMILES', 'source']]
 df_clean.to_csv('../data/data_ChEMBL_BindingDB_Plinder_clean.csv')
 """
 
+"""
 df = pd.read_csv('../data/data_SMPBind_clean.csv', index_col=0)
 df['seq_len'] = df['Sequence'].apply(lambda x: len(x))
 df['mol_len'] = df['SMILES'].apply(lambda x: len(x))
@@ -153,10 +154,10 @@ print('Mean SMILES length per source:', mean_smiles_length_per_source)
 print('Median SMILES length per source:', median_smiles_length_per_source)
 print('Mode SMILES length per source:', mode_smiles_length_per_source)
 print('Standard deviation SMILES length per source:', stdev_smiles_length_per_source)
-
+"""
 
 #df = pd.read_csv('../data/data_ChEMBL_BindingDB_Plinder_clean.csv', index_col=0)
-df = pd.read_csv('../data/data_SMPBind_clean.csv', index_col=0)
+df = pd.read_csv('../data/data_SMPBind_downsampled_25.csv', index_col=0)
 
 # Calculate the number of different proteins and molecules that are present in the dataset
 unique_sequences = df['Sequence'].nunique()
@@ -184,4 +185,23 @@ print('Standard deviation number of molecules per protein:', stdev_molecules_per
 # Plot the distribution of num. of molecules per protein sequence
 plt.figure()
 sns.histplot(data=molecules_per_protein, bins=50, kde=True)
-plt.savefig('../data/plots/SMPBind_mols_per_prot_distribution.png')
+plt.savefig('../data/plots/SMPBind_mols_per_prot_distribution_25.png')
+
+# Plot the distribution of num. of molecules per protein multiplied by the number of molecules per protein
+# the counts of the histrogram (y-axis) should be multiplied by the number of molecules per protein
+# plot weighted histogram
+plt.figure()
+sns.histplot(data=molecules_per_protein, x='Num_molecules', weights='Num_molecules', bins=50, kde=True)
+plt.savefig('../data/plots/SMPBind_mols_per_prot_distribution_weighted_25.png')
+
+
+counts = molecules_per_protein['Num_molecules'].value_counts().sort_index()
+counts = counts.reset_index()
+counts.columns = ['Num_molecules', 'Count']
+counts['Count'] = counts['Count'] * counts['Num_molecules']
+print(counts)
+
+plt.figure(figsize=(15, 5))
+sns.barplot(data=counts, x='Num_molecules', y='Count', color='blue', alpha=0.7)
+plt.xticks(size=6)
+plt.savefig('../data/plots/SMPBind_mols_per_prot_distribution_multiplied_25.png')

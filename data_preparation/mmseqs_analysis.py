@@ -5,7 +5,8 @@ import numpy as np
 from sklearn.manifold import TSNE
 
 # Load the data
-df = pd.read_csv('seq_sim_analysis/mmseqs/valDB_cluster.tsv', sep='\t', header=None, names=['clu_rep', 'clu_member'])
+#df = pd.read_csv('seq_sim_analysis/mmseqs/valDB_cluster.tsv', sep='\t', header=None, names=['clu_rep', 'clu_member'])
+df = pd.read_csv('cluter_mmseqs_SMPBind/cluster95_cluster.tsv', sep='\t', header=None, names=['clu_rep', 'clu_member'])
 print(df)
 
 # Create a dictionary of clusters and counts
@@ -17,7 +18,7 @@ print('Number of clusters:', len(clusters))
 print('Number of elements per cluster:\n', counts_df)
 
 cluster_mapping = {rep: i for i, rep in enumerate(df['clu_rep'].unique())}
-
+exit()
 # Plot a tSNE of the clusters
 matrix = pd.read_csv('seq_sim_analysis/validation_similarity_matrix.csv', index_col=0)
 distance_matrix = 1 - matrix
