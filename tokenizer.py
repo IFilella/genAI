@@ -29,16 +29,16 @@ class MolecularTokenizer:
         self.eos_token = '<eos>'
         self.unk_token = '<unk>'
         self.special_tokens = [self.cls_token, self.pad_token, self.eos_token, self.unk_token]
-        self.regex = '(Br?|Cl?|As|Sb|Se|Si|Sn|Te|H|N|O|S|P|F|I|b|c|n|o|s|p|\\(|\\)|\\[|\\]|\\.|=|\n#|-|\\+|\\\\|\\/|:|~|@@|@|\\?|>>?|\\*|\\$|\\%[0-9]{2}|[0-9])'
+        self.regex = '(Br?|Cl?|As|Sb|Se|Si|Sn|Te|H|N|O|S|P|F|I|b|c|n|o|s|p|\\(|\\)|\\[|\\]|\\.|\\=|\\#|\\-|\\+|\\\\|\\/|\\:|\\~|@@|@|\\?|>>?|\\*|\\$|\\%[0-9]{2}|[0-9])'
         self.build_vocab()
         
     def build_vocab(self):
         # Fixed vocabulary for molecular SMILES, 88 tokens
         chemical_tokens = [
-            '(', ')', '*', '+', '-', '/', '1', '2', '3', '4', '5', '6', '7',\
-            '8', '9', '=', '@', '@@', 'As', 'B', 'Br', 'C', 'Cl', 'F', 'H',\
-            'I', 'N', 'O', 'P', 'S', 'Sb', 'Se', 'Si', 'Sn', 'Te', '[', '\\',\
-            ']', 'b','c', 'n', 'o', 's'
+            '#', '(', ')', '*', '+', '-', '/', '1', '2', '3', '4', '5', '6',\
+            '7', '8', '9', '=', '@', '@@', 'As', 'B', 'Br', 'C', 'Cl', 'F',\
+            'H', 'I', 'N', 'O', 'P', 'S', 'Sb', 'Se', 'Si', 'Sn', 'Te', '[',\
+            '\\', ']', 'b' ,'c', 'n', 'o', 's'
             ]
         
         self.vocab = self.special_tokens + chemical_tokens
