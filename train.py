@@ -271,6 +271,7 @@ def train_model(prot_seqs,
                 dropout=0.1,
                 num_layers=12,
                 loss_function='crossentropy',
+                label_smoothing=None,
                 optimizer='Adam',
                 weight_decay=0,
                 betas=(0.9, 0.999),
@@ -306,6 +307,7 @@ def train_model(prot_seqs,
         dropout (float, optional): The dropout rate. Defaults to 0.1.
         num_layers (int, optional): The number of transformer layers. Defaults to 12.
         loss_function (str, optional): The loss function to use. Defaults to 'crossentropy'.
+        label_smoothing (float, optional): The label smoothing factor for the loss function. Defaults to None.
         optimizer (str, optional): The optimizer to use. Defaults to 'Adam'.
         weight_decay (float, optional): The weight decay (L2 regularization) for optimizer. Defaults to 0.
         betas (tuple, optional): The beta values for the optimizer. Defaults to (0.9, 0.999).
@@ -381,7 +383,10 @@ def train_model(prot_seqs,
     # TO DO: Add support for other loss functions and optimizers
     # Loss function
     if loss_function == 'crossentropy':
-        criterion = nn.CrossEntropyLoss(ignore_index=-100, label_smoothing=0.1)
+        if label_smoothing:
+            criterion = nn.CrossEntropyLoss(ignore_index=-100, label_smoothing=label_smoothing)
+        else:
+            criterion = nn.CrossEntropyLoss(ignore_index=-100)
     else:
         raise ValueError('Invalid loss function. Please use "crossentropy"')
 
@@ -551,7 +556,8 @@ def main():
     train_model(prots, mols, config['num_epochs'], config['learning_rate'],
                 config['batch_size'], config['d_model'], config['num_heads'],
                 config['ff_hidden_layer'], config['dropout'], config['num_layers'],
-                config['loss_function'], config['optimizer'], config['weight_decay'], config['betas'],
+                config['loss_function'], config['label_smoothing'],
+                config['optimizer'], config['weight_decay'], config['betas'],
                 config['weights_path'], config['get_wandb'],config['wandb']['wandb_project'],
                 config['wandb']['wandb_config'], config['wandb']['wandb_name'],
                 config['validation_split'], config['num_gpus'], config['verbose'],

@@ -25,6 +25,7 @@ def load_config(config_path):
         'num_epochs': config['num_epochs'],
         'learning_rate': config['learning_rate'],
         'loss_function': config['loss_function'],
+        'label_smoothing': config['label_smoothing'],
         'optimizer': config['optimizer'],
         'weight_decay': config['weight_decay'],
         'betas': config['betas'],

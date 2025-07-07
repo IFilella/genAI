@@ -44,6 +44,7 @@ batch_size: 64
 num_epochs: 12
 learning_rate: $lr
 loss_function: 'crossentropy'
+label_smoothing: None
 optimizer: 'AdamW'
 weight_decay: $wd
 betas: [$b]
