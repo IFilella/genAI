@@ -287,6 +287,7 @@ def train_model(prot_seqs,
                 mol_max_length=80,
                 patience=5,
                 delta=0,
+                scheduled_sampling=False,
                 seed=1234,
                 checkpoint_epoch=False,
                 resume_training=False
@@ -323,6 +324,7 @@ def train_model(prot_seqs,
         mol_max_length (int, optional): The maximum length of the SMILES strings. Defaults to 80.
         patience (int, optional): The number of epochs to wait before early stopping. Defaults to 5.
         delta (int, optional): The minimum change in validation loss to qualify as an improvement. Defaults to 0.
+        scheduled_sampling (bool, optional): Whether to use scheduled sampling. Defaults to False.
         seed (int, optional): The random seed. Defaults to 1234.
         checkpoint_epoch(bool, optional): Whether to save a checkpoint per epoch if True, or overwrite and save the
                                             last epoch checkpoint if False. Defaults to False.
@@ -448,14 +450,15 @@ def train_model(prot_seqs,
             timer_train = Timer(autoreset=True)
             timer_train.start('Train Epoch %d/%d'%(epoch+1, num_epochs))
 
-        # avg_train_loss, train_acc = train_epoch(model, train_dataloader,
-        #                                         criterion, optimizer,
-        #                                         tokenizer, fabric, verbose)
-
-        avg_train_loss, train_acc = train_epoch_scheduled_sampling(model, train_dataloader,
-                                                                criterion, optimizer,
-                                                                tokenizer, fabric,
-                                                                epoch, 10, verbose)
+        if scheduled_sampling:
+            avg_train_loss, train_acc = train_epoch_scheduled_sampling(model, train_dataloader,
+                                                                        criterion, optimizer,
+                                                                        tokenizer, fabric,
+                                                                        epoch, 10, verbose)
+        else:
+            avg_train_loss, train_acc = train_epoch(model, train_dataloader,
+                                                    criterion, optimizer,
+                                                    tokenizer, fabric, verbose)
 
         avg_train_acc = fabric.all_reduce(train_acc, reduce_op='mean')
 
@@ -546,7 +549,7 @@ def main():
 
     torch.set_float32_matmul_precision('medium')
     set_seed(config['seed'])
-    
+        
     # Get the data
     df = pd.read_csv(config['data_path'])
     prots = df[config['col_prots']].tolist()
@@ -562,8 +565,8 @@ def main():
                 config['wandb']['wandb_config'], config['wandb']['wandb_name'],
                 config['validation_split'], config['num_gpus'], config['verbose'],
                 config['prot_max_length'], config['mol_max_length'],
-                config['es_patience'], config['es_delta'], config['seed'],
-                config['checkpoint_epoch'], config['resume_training'])
+                config['es_patience'], config['es_delta'], config['scheduled_sampling'],
+                config['seed'], config['checkpoint_epoch'], config['resume_training'])
 
     timer_total.stop()
 
