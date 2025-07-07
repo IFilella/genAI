@@ -95,6 +95,7 @@ plt.savefig('../data/plots/downsampling_effect.png')
 """
 
 # Calculate the percentage of proteins that have the 50% of protein-molecule pairs
+"""
 def calculate_percentage(df, threshold=0.5):
     mol_count = df.groupby('Sequence')['SMILES'].nunique().reset_index()
     mol_count.columns = ['Sequence', 'Num_molecules']
@@ -110,7 +111,23 @@ def calculate_percentage(df, threshold=0.5):
     
     return percentage
 
-df = pd.read_csv('../data/data_SMPBind_downsampled_25.csv')
-percentage = calculate_percentage(df)
+df = pd.read_csv('../data/data_SMPBind_downsampled_100.csv')
+percentage = calculate_percentage(df, threshold=0.1)
 print(f'Percentage of proteins needed to cover 50% of protein-molecule pairs: {percentage:.2f}%')
+"""
+
+# Sort the dataframe by the number of molecules per protein
+def sort_by_molecules_per_protein(df):
+    mol_count = df.groupby('Sequence')['SMILES'].nunique().reset_index()
+    mol_count.columns = ['Sequence', 'Num_molecules']
+    mol_count = mol_count.sort_values(by='Num_molecules', ascending=False)
     
+    sorted_df = df.merge(mol_count, on='Sequence')
+    sorted_df = sorted_df.sort_values(by=['Num_molecules','Sequence'], ascending=[False,True])
+    sorted_df.drop(columns=['Num_molecules'], inplace=True)
+    
+    return sorted_df
+
+df = pd.read_csv('../data/data_SMPBind_downsampled_25.csv')
+sorted_df = sort_by_molecules_per_protein(df)
+sorted_df.to_csv('../data/data_SMPBind_downsampled_25_sorted.csv', index=False)
