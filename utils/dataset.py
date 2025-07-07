@@ -3,6 +3,7 @@ from torch.utils.data import Dataset, DataLoader, Subset, random_split, Distribu
 import random
 import numpy as np
 import matplotlib.pyplot as plt
+import pandas as pd
 
 # DATASET CLASS
 class ProtMolDataset(Dataset):
@@ -56,6 +57,27 @@ def collate_fn(batch, tokenizer, prot_max_length, mol_max_length):
     
     return {'input_ids': input_ids, 'attention_mask': attention_mask, 'labels': labels}
 
+def sort_by_molecules_per_protein(dataset):
+    # Convert dataset to DataFrame for easier manipulation
+    data = [{'sequence': dataset[idx][0], 'smiles': dataset[idx][1]} for idx in range(len(dataset))]
+    df = pd.DataFrame(data)
+    
+    # Sort the DataFrame by the number of unique SMILES per protein sequence (ascending order)
+    mol_count = df.groupby('sequence')['smiles'].nunique().reset_index()
+    mol_count.columns = ['sequence', 'num_molecules']
+    mol_count = mol_count.sort_values(by='num_molecules', ascending=False)
+    
+    sorted_df = df.merge(mol_count, on='sequence')
+    sorted_df = sorted_df.sort_values(by=['num_molecules','sequence'], ascending=[True,True])
+    sorted_df.drop(columns=['num_molecules'], inplace=True)
+
+    # Convert the sorted DataFrame back to a subset
+    data = list(zip(sorted_df['sequence'], sorted_df['smiles']))
+    indices = [idx for idx, item in enumerate(dataset) if (item[0], item[1]) in data]
+    sorted_dataset = Subset(dataset, indices)
+    
+    return sorted_dataset
+
 # DATA PREPARATION
 def prepare_data(prot_seqs, smiles, validation_split, batch_size, tokenizer,
                  fabric, prot_max_length, mol_max_length, verbose, seed):
@@ -74,17 +96,11 @@ def prepare_data(prot_seqs, smiles, validation_split, batch_size, tokenizer,
     train_size = len(dataset) - val_size
     train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
     
-    # Sort the datasets based on the lengths of the sequences
-    idxs_train = list(range(len(train_dataset)))
-    idxs_val = list(range(len(val_dataset)))
-    train_lengths = [(idx, len(train_dataset[idx][0]) + len(train_dataset[idx][1])) for idx in idxs_train]
-    val_lengths = [(idx, len(val_dataset[idx][0]) + len(val_dataset[idx][1])) for idx in idxs_val]
-    sorted_train_indices = [idx for idx, length in sorted(train_lengths, key=lambda x: x[1])]
-    sorted_val_indices = [idx for idx, length in sorted(val_lengths, key=lambda x: x[1])]
-
-    # Create the sorted datasets using the sorted indices
-    train_dataset = Subset(train_dataset, sorted_train_indices)
-    val_dataset = Subset(val_dataset, sorted_val_indices)
+    # Sort the datasets according to the number of molecules per protein
+    if verbose >= 0:
+        fabric.print('Sorting the datasets by the number of molecules per protein...')
+    train_dataset = sort_by_molecules_per_protein(train_dataset)
+    val_dataset = sort_by_molecules_per_protein(val_dataset)
     
     # Check if the sort worked
     if verbose >= 2:
