@@ -96,8 +96,14 @@ def scheduled_sampling_prob_lin(epoch):
     
     return y
 
-def train_epoch_scheduled_sampling(model, dataloader, criterion, optimizer, tokenizer, fabric, epoch, k, verbose=1):
-    """Train the model for one epoch with scheduled sampling."""
+def train_epoch_scheduled_sampling(model, dataloader, criterion, optimizer, tokenizer, fabric, epoch, scheduled='prob_lin', k=10, verbose=1):
+    """
+    Train the model for one epoch with teacher forcing, autoregressive, of with scheduled sampling, depending on the flag.
+        - scheduled = 0: use teacher forcing always
+        - scheduled = 1: do not use teacher forcing
+        - scheduled = 'prob_lin': use the linear decay strategy
+        - scheduled = 'prob_invsig': use the inverse sigmoid decay strategy
+    """
 
     model.train()
 
@@ -105,7 +111,47 @@ def train_epoch_scheduled_sampling(model, dataloader, criterion, optimizer, toke
     total_train_correct = 0
     total_train_samples = 0
 
-    p = scheduled_sampling_prob_lin(epoch)
+    def run_teacher_forcing(input_tensor, input_att_mask):
+        logits = model(input_tensor, input_att_mask, tokenizer.delim_token_id, fabric)
+        logits = logits.contiguous().view(-1, logits.size(-1))
+        
+        return logits
+    
+    def run_autoregressive(input_tensor, seq_length):
+        pad_id = tokenizer.prot_tokenizer.pad_token_id
+        delim_idx = (input_tensor[0] == tokenizer.delim_token_id).nonzero().item()
+
+        input_decoder = input_tensor[:, :delim_idx + 1]  # Start with prefix (protein + <del>)
+        input_decoder = fabric.to_device(input_decoder)
+
+        predicted_tokens = []
+
+        max_len = seq_length - delim_idx  # Generate only molecule sequence
+
+        for _ in range(max_len):
+            input_att_mask = (input_decoder == pad_id)
+            input_att_mask = fabric.to_device(input_att_mask)
+            logits = model(input_decoder, input_att_mask, tokenizer.delim_token_id, fabric)
+
+            pred_token = logits[:, -1, :].argmax(dim=-1).unsqueeze(1)  # Get predicted token
+            predicted_tokens.append(pred_token)
+            input_decoder = torch.cat((input_decoder, pred_token), dim=1)  # Append prediction
+
+        logits = logits.view(-1, logits.shape[-1])  # Reshape for loss calculation
+        
+        return logits
+    
+    if scheduled == 'prob_lin':
+        p = scheduled_sampling_prob_lin(epoch)
+    elif scheduled == 'prob_invsig':
+        p = scheduled_sampling_prob_invsig(epoch,k)
+    elif scheduled == 0:
+        p = 1 # Always use teacher forcing
+    elif scheduled == 1:
+        p = 0 # Never use teacher forcing (always autoregressive)
+    else:
+        P = 1 # Default fallback
+        fabric.print('WARNING: Incorrect scheduled method, setting to always use teacher forcing.')
 
     for i, batch in enumerate(dataloader):
         
@@ -124,32 +170,10 @@ def train_epoch_scheduled_sampling(model, dataloader, criterion, optimizer, toke
             fabric.print(f"\t\tUse teacher forcing: {use_teacher_forcing}, Scheduled Sampling Probability: {p:.4f}")
         
         if use_teacher_forcing:
-            # Standard teacher forcing: use ground-truth tokens as input
-            logits = model(input_tensor, input_att_mask, tokenizer.delim_token_id, fabric)
-            logits = logits.contiguous().view(-1, logits.size(-1))
+            logits = run_teacher_forcing(input_tensor, input_att_mask)
 
         else:
-            # Autoregressive mode (no teacher forcing)
-            pad_id = tokenizer.prot_tokenizer.pad_token_id
-            delim_idx = (input_tensor[0] == tokenizer.delim_token_id).nonzero().item()
-
-            input_decoder = input_tensor[:, :delim_idx + 1]  # Start with prefix (protein + <del>)
-            input_decoder = fabric.to_device(input_decoder)
-
-            predicted_tokens = []
-
-            max_len = seq_length - delim_idx  # Generate only molecule sequence
-
-            for _ in range(max_len):
-                input_att_mask = (input_decoder == pad_id)
-                input_att_mask = fabric.to_device(input_att_mask)
-                logits = model(input_decoder, input_att_mask, tokenizer.delim_token_id, fabric)
-
-                pred_token = logits[:, -1, :].argmax(dim=-1).unsqueeze(1)  # Get predicted token
-                predicted_tokens.append(pred_token)
-                input_decoder = torch.cat((input_decoder, pred_token), dim=1)  # Append prediction
-
-            logits = logits.view(-1, logits.shape[-1])  # Reshape for loss calculation
+            logits = run_autoregressive(input_tensor, seq_length)
 
         # Compute loss
         labels = labels.contiguous().view(-1)
@@ -324,7 +348,7 @@ def train_model(prot_seqs,
         mol_max_length (int, optional): The maximum length of the SMILES strings. Defaults to 80.
         patience (int, optional): The number of epochs to wait before early stopping. Defaults to 5.
         delta (int, optional): The minimum change in validation loss to qualify as an improvement. Defaults to 0.
-        scheduled_sampling (bool, optional): Whether to use scheduled sampling. Defaults to False.
+        scheduled_sampling (bool, optional): Whether to use scheduled sampling. Options: 0, 1, or probability decay function.
         seed (int, optional): The random seed. Defaults to 1234.
         checkpoint_epoch(bool, optional): Whether to save a checkpoint per epoch if True, or overwrite and save the
                                             last epoch checkpoint if False. Defaults to False.
@@ -450,15 +474,11 @@ def train_model(prot_seqs,
             timer_train = Timer(autoreset=True)
             timer_train.start('Train Epoch %d/%d'%(epoch+1, num_epochs))
 
-        if scheduled_sampling:
-            avg_train_loss, train_acc = train_epoch_scheduled_sampling(model, train_dataloader,
-                                                                        criterion, optimizer,
-                                                                        tokenizer, fabric,
-                                                                        epoch, 10, verbose)
-        else:
-            avg_train_loss, train_acc = train_epoch(model, train_dataloader,
-                                                    criterion, optimizer,
-                                                    tokenizer, fabric, verbose)
+        avg_train_loss, train_acc = train_epoch_scheduled_sampling(model, train_dataloader,
+                                                                    criterion, optimizer,
+                                                                    tokenizer, fabric,
+                                                                    epoch, scheduled_sampling,
+                                                                    10, verbose)
 
         avg_train_acc = fabric.all_reduce(train_acc, reduce_op='mean')
 
