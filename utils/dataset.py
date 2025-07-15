@@ -57,7 +57,7 @@ def collate_fn(batch, tokenizer, prot_max_length, mol_max_length):
     
     return {'input_ids': input_ids, 'attention_mask': attention_mask, 'labels': labels}
 
-def sort_by_molecules_per_protein(dataset, verbose=0):
+def sort_by_molecules_per_protein(dataset, verbose=0, out='splits/train_split.csv'):
     # Convert dataset to DataFrame for easier manipulation
     data = [{'sequence': dataset[idx][0], 'smiles': dataset[idx][1]} for idx in range(len(dataset))]
     df = pd.DataFrame(data)
@@ -75,6 +75,9 @@ def sort_by_molecules_per_protein(dataset, verbose=0):
         # Print the sorted DataFrame for debugging
         print("Sorted DataFrame by number of molecules per protein:")
         print(sorted_df.head())
+        
+        # Save the splits into a csv
+        sorted_df.to_csv(out, index=False)
 
     # Convert the sorted DataFrame back to a subset
     data = list(zip(sorted_df['sequence'], sorted_df['smiles']))
@@ -104,8 +107,8 @@ def prepare_data(prot_seqs, smiles, validation_split, batch_size, tokenizer,
     # Sort the datasets according to the number of molecules per protein
     if verbose >= 0:
         fabric.print('Sorting the datasets by the number of molecules per protein...')
-    train_dataset = sort_by_molecules_per_protein(train_dataset)
-    val_dataset = sort_by_molecules_per_protein(val_dataset)
+    train_dataset = sort_by_molecules_per_protein(train_dataset, verbose, out='splits/train_split.csv')
+    val_dataset = sort_by_molecules_per_protein(val_dataset, verbose, out='splits/val_split.csv')
     
     idxs_train = list(range(len(train_dataset)))
     idxs_val = list(range(len(val_dataset)))

@@ -11,6 +11,7 @@ configs/
 runs/
 metrics/
 tests/
+splits/
 data_preparation/seq_sim_analysis/
 data_preparation/cluter_mmseqs_SMPBind/
 data_preparation/*.csv
