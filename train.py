@@ -539,7 +539,7 @@ def train_model(prot_seqs,
                         "Validation F1": other_metrics['f1']})
 
         # Early stopping based on validation loss
-        early_stopping(avg_val_loss, model, weights_path, epoch, optimizer, fabric, checkpoint_epoch)
+        early_stopping(avg_val_loss, model, weights_path, epoch, optimizer, fabric, checkpoint_epoch, resume_training, start_epoch)
 
         if early_stopping.early_stop:
             if verbose >=0:
