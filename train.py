@@ -96,13 +96,23 @@ def scheduled_sampling_prob_lin(epoch):
     
     return y
 
-def train_epoch_scheduled_sampling(model, dataloader, criterion, optimizer, tokenizer, fabric, epoch, scheduled='prob_lin', k=10, verbose=1):
+def inverse_scheduled_sampling_prob_lin(epoch, total_epochs):
+    """This aims to add a little of teacher forcing as training runs.
+    This is a linear increasing strategy, until reaching a total of 0.5 probability
+    on the last epoch."""
+    
+    y = (0.5/total_epochs) * epoch
+    
+    return y
+
+def train_epoch_scheduled_sampling(model, dataloader, criterion, optimizer, tokenizer, fabric, epoch, num_epochs, scheduled='prob_lin', k=10, verbose=1):
     """
     Train the model for one epoch with teacher forcing, autoregressive, of with scheduled sampling, depending on the flag.
         - scheduled = 0: use teacher forcing always
         - scheduled = 1: do not use teacher forcing
         - scheduled = 'prob_lin': use the linear decay strategy
         - scheduled = 'prob_invsig': use the inverse sigmoid decay strategy
+        - scheduled = 'inv_prob_lin': use an increasing linear strategy (inverse scheduled sampling)
     """
 
     model.train()
@@ -145,12 +155,14 @@ def train_epoch_scheduled_sampling(model, dataloader, criterion, optimizer, toke
         p = scheduled_sampling_prob_lin(epoch)
     elif scheduled == 'prob_invsig':
         p = scheduled_sampling_prob_invsig(epoch,k)
+    elif scheduled == 'inv_prob_lin':
+        p = inverse_scheduled_sampling_prob_lin(epoch, num_epochs)
     elif scheduled == 0:
         p = 1 # Always use teacher forcing
     elif scheduled == 1:
         p = 0 # Never use teacher forcing (always autoregressive)
     else:
-        P = 1 # Default fallback
+        p = 1 # Default fallback
         fabric.print('WARNING: Incorrect scheduled method, setting to always use teacher forcing.')
 
     for i, batch in enumerate(dataloader):
@@ -477,7 +489,8 @@ def train_model(prot_seqs,
         avg_train_loss, train_acc = train_epoch_scheduled_sampling(model, train_dataloader,
                                                                     criterion, optimizer,
                                                                     tokenizer, fabric,
-                                                                    epoch, scheduled_sampling,
+                                                                    epoch, num_epochs,
+                                                                    scheduled_sampling,
                                                                     10, verbose)
 
         avg_train_acc = fabric.all_reduce(train_acc, reduce_op='mean')
