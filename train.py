@@ -470,7 +470,7 @@ def train_model(prot_seqs,
     early_stopping = EarlyStopping(patience=patience, delta=delta, verbose=verbose)
 
     if fabric.is_global_zero and not resume_training:
-        with open(f'metrics/train_dm{d_model}_nh{num_heads}_ff{ff_hidden_layer}_nl{num_layers}.csv', 'w') as f:
+        with open(f'metrics/{wandb_name}.csv', 'w') as f:
             f.write('Epoch,T_loss,T_acc,V_loss,V_acc,Pre,Rec,F1\n')
             
     for epoch in range(start_epoch, num_epochs):
